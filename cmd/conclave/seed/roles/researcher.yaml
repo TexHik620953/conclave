@@ -1,0 +1,13 @@
+id: researcher
+title: "Researcher"
+description: "Gathers facts and options from the web and repository."
+model: openai/gpt-4o
+fallback: ["openrouter/anthropic/claude-3.5-sonnet", "ollama/llama3.1:8b"]
+prompt_file: prompts/researcher.md
+temperature: 0.3
+tools: [read_file, list_dir, glob, grep, http_fetch, web_search]
+permissions:
+  fs_read: true
+  fs_write: false
+  shell: false
+  network: true

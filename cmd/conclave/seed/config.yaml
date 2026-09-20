@@ -1,0 +1,84 @@
+# Conclave configuration. Everything here is user-editable.
+# Model references use the form "provider/model".
+
+providers:
+  ollama:
+    type: openai
+    base_url: "http://localhost:11434/v1"
+    models: ["qwen2.5-coder:7b", "llama3.1:8b"]
+  openai:
+    type: openai
+    base_url: "https://api.openai.com/v1"
+    api_key_env: OPENAI_API_KEY
+  openrouter:
+    type: openai
+    base_url: "https://openrouter.ai/api/v1"
+    api_key_env: OPENROUTER_API_KEY
+  deepseek:
+    type: openai
+    base_url: "https://api.deepseek.com/v1"
+    api_key_env: DEEPSEEK_API_KEY
+
+settings:
+  # Default model for roles that do not pin one.
+  default_model: "ollama/qwen2.5-coder:7b"
+  # Role used by controller nodes that do not name one.
+  controller: controller
+  max_parallel: 4
+  max_iterations: 12
+  max_tokens: 8192
+  # Trim context blocks to this many bytes (0 = unlimited).
+  max_context_bytes: 120000
+  timeout: 5m
+  # How to react when a gate.ask has no interactive user: next|else|stop.
+  on_no_user: next
+  # Transient provider-error retries.
+  retry:
+    max_attempts: 3
+    base_delay: 1s
+    max_delay: 30s
+  # Cost tracking; on_budget is warn|abort.
+  budget_usd: 0
+  on_budget: warn
+  # web_search tool (same providers opencode uses: Exa, or a self-hosted SearXNG).
+  web_search:
+    provider: exa
+    api_key_env: EXA_API_KEY
+    max_results: 5
+    search_type: auto
+    # provider: searxng
+    # base_url: "http://localhost:8888"
+  model_prices:
+    "openai/gpt-4o": {input_per_1m: 2.50, output_per_1m: 10.00}
+    "openai/gpt-4o-mini": {input_per_1m: 0.15, output_per_1m: 0.60}
+    "deepseek/deepseek-chat": {input_per_1m: 0.27, output_per_1m: 1.10}
+  # Context window per model, used to show usage against the limit.  model_limits:
+    "openai/gpt-4o": 128000
+    "openai/gpt-4o-mini": 128000
+    "ollama/qwen2.5-coder:7b": 32768
+    "ollama/llama3.1:8b": 131072
+    "deepseek/deepseek-chat": 64000
+  defaults:
+    # Process-wide permission defaults; roles may override.
+    fs_read: true
+    fs_write: false
+    shell: false
+    network: true
+    allowed_hosts: []
+    allowed_commands: []
+    denied_commands: ["rm -rf /", "sudo", ":(){:|:&};:"]
+    command_timeout: 2m
+    max_output_bytes: 65536
+
+# External MCP servers whose tools roles may use. Tool names are exposed as
+# "<server>__<tool>" and must be listed in a role's `tools` to be available.
+# Use `command` for stdio servers or `url` for remote Streamable HTTP servers.
+mcp: {}
+#  github:
+#    command: ["npx", "-y", "@modelcontextprotocol/server-github"]
+#    env:
+#      GITHUB_PERSONAL_ACCESS_TOKEN: "${GITHUB_TOKEN}"
+#  remote:
+#    url: "https://mcp.example.com/mcp"
+#    headers:
+#      Authorization: "Bearer ${MCP_TOKEN}"

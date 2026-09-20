@@ -1,0 +1,32 @@
+description: "Assess, plan and review an operational change."
+inputs: [task]
+settings:
+  max_parallel: 3
+  outputs: [assessment.md, plan.md, review.md, summary.md]
+nodes:
+  - id: assess
+    type: agent
+    role: devops
+    prompt: "Assess the current state and constraints for the requested change."
+    output: assessment.md
+    next: [plan]
+
+  - id: plan
+    type: agent
+    role: architect
+    prompt: "Produce an execution plan with rollback and verification steps."
+    output: plan.md
+    next: [review]
+
+  - id: review
+    type: parallel
+    roles: [security_reviewer, qa, devops]
+    prompt: "Review the plan for your specialty. End with STATUS: PASS or STATUS: FAIL."
+    output: review.md
+    next: [summary]
+
+  - id: summary
+    type: agent
+    role: tech_writer
+    prompt: "Summarize the plan, review outcome and remaining risks."
+    output: summary.md

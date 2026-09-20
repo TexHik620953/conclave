@@ -1,0 +1,13 @@
+id: qa
+title: "QA Engineer"
+description: "Verifies behavior, edge cases and test coverage."
+model: openai/gpt-4o-mini
+fallback: ["ollama/qwen2.5-coder:7b"]
+prompt_file: prompts/qa.md
+temperature: 0.2
+tools: [read_file, list_dir, glob, grep, run_shell, run_tests]
+permissions:
+  fs_read: true
+  fs_write: false
+  shell: true
+  network: false

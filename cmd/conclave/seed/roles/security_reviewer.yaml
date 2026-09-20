@@ -1,0 +1,13 @@
+id: security_reviewer
+title: "Security Reviewer"
+description: "Audits changes for vulnerabilities and unsafe patterns."
+model: openai/gpt-4o
+fallback: ["openrouter/anthropic/claude-3.5-sonnet", "ollama/qwen2.5-coder:7b"]
+prompt_file: prompts/security_reviewer.md
+temperature: 0.1
+tools: [read_file, list_dir, glob, grep, git]
+permissions:
+  fs_read: true
+  fs_write: false
+  shell: false
+  network: true

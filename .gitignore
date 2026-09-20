@@ -1,0 +1,8 @@
+/conclave
+/test/
+/bin/
+/.conclave/runs/
+*.db
+*.db-shm
+*.db-wal
+web/node_modules/

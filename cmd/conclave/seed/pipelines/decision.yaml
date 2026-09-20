@@ -1,0 +1,42 @@
+description: "Research options, consult the user and record a decision."
+inputs: [task]
+settings:
+  max_parallel: 3
+  outputs: [research.md, options.md, decision.md, critique.md]
+nodes:
+  - id: research
+    type: agent
+    role: researcher
+    prompt: "Gather the facts needed to make the decision."
+    output: research.md
+    next: [options]
+
+  - id: options
+    type: agent
+    role: architect
+    prompt: "List the viable options with trade-offs. If the user must choose, use ask_user."
+    output: options.md
+    next: [decide]
+
+  - id: decide
+    type: controller
+    role: controller
+    prompt: "Decide whether to record a decision now or stop."
+    choices: [document, stop]
+
+  - id: document
+    type: agent
+    role: tech_writer
+    prompt: "Write a decision record: context, options, choice and rationale."
+    output: decision.md
+    next: [critique]
+
+  - id: critique
+    type: agent
+    role: critic
+    prompt: "Critique the decision: overlooked risks and reversibility."
+    output: critique.md
+
+  - id: stop
+    type: transform
+    template: "Controller stopped before recording a decision."

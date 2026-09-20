@@ -1,0 +1,62 @@
+description: "Implement a feature with planning, coding and multi-role review."
+inputs: [task]
+settings:
+  max_parallel: 4
+  outputs: [plan.md, review.md, summary.md]
+nodes:
+  - id: analyze
+    type: agent
+    role: architect
+    prompt: "Analyze the task and produce a concrete implementation plan."
+    output: plan.md
+    next: [decide]
+
+  - id: decide
+    type: controller
+    role: controller
+    prompt: "Decide whether the plan is ready to implement."
+    choices: [approve, stop]
+
+  - id: approve
+    type: gate
+    ask: true
+    prompt: "Approve the plan before implementation?"
+    else: stop
+    next: [implement]
+
+  - id: implement
+    type: agent
+    role: senior
+    prompt: "Implement the plan. Read the relevant files and edit the workspace directly."
+    output: implementation.md
+    next: [review]
+
+  - id: review
+    type: parallel
+    roles: [security_reviewer, qa, devops]
+    prompt: "Review the current implementation for your specialty. End with STATUS: PASS or STATUS: FAIL."
+    output: review.md
+    next: [revise]
+
+  - id: revise
+    type: loop
+    until: "review.passed"
+    max_iterations: 3
+    body: [review, fix]
+    next: [summarize]
+
+  - id: fix
+    type: agent
+    role: senior
+    prompt: "Read the latest review and fix the reported issues in the workspace. If the review passed, make no changes."
+    output: fixes.md
+
+  - id: summarize
+    type: agent
+    role: tech_writer
+    prompt: "Summarize what was implemented, the review outcome and any remaining risks."
+    output: summary.md
+
+  - id: stop
+    type: transform
+    template: "Controller stopped before implementation."

@@ -1,0 +1,13 @@
+id: backend
+title: "Backend Engineer"
+description: "Builds and reviews services, APIs and data flow."
+model: deepseek/deepseek-chat
+fallback: ["openai/gpt-4o", "ollama/qwen2.5-coder:7b"]
+prompt_file: prompts/backend.md
+temperature: 0.2
+tools: [read_file, write_file, edit_file, apply_patch, list_dir, glob, grep, run_shell, run_tests, git]
+permissions:
+  fs_read: true
+  fs_write: true
+  shell: true
+  network: true

@@ -1,0 +1,13 @@
+id: frontend
+title: "Frontend Engineer"
+description: "Builds and reviews UI code, accessibility and UX details."
+model: openai/gpt-4o
+fallback: ["openrouter/anthropic/claude-3.5-sonnet", "ollama/qwen2.5-coder:7b"]
+prompt_file: prompts/frontend.md
+temperature: 0.3
+tools: [read_file, write_file, edit_file, apply_patch, list_dir, glob, grep, run_shell, run_tests]
+permissions:
+  fs_read: true
+  fs_write: true
+  shell: true
+  network: true

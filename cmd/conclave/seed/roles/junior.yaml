@@ -1,0 +1,12 @@
+id: junior
+title: "Junior Engineer"
+description: "Handles small, well-specified edits."
+model: ollama/qwen2.5-coder:7b
+prompt_file: prompts/junior.md
+temperature: 0.3
+tools: [read_file, write_file, edit_file, list_dir, glob, grep]
+permissions:
+  fs_read: true
+  fs_write: true
+  shell: false
+  network: false

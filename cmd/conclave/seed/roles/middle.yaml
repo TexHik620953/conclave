@@ -1,0 +1,13 @@
+id: middle
+title: "Mid-level Engineer"
+description: "Implements scoped tasks under guidance."
+model: ollama/qwen2.5-coder:7b
+fallback: ["openai/gpt-4o-mini"]
+prompt_file: prompts/middle.md
+temperature: 0.3
+tools: [read_file, write_file, edit_file, apply_patch, list_dir, glob, grep, run_shell, run_tests]
+permissions:
+  fs_read: true
+  fs_write: true
+  shell: true
+  network: false

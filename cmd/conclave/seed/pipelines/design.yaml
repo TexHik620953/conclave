@@ -1,0 +1,31 @@
+description: "Explore a design: research, concept, critique and specification."
+inputs: [task]
+settings:
+  outputs: [research.md, concept.md, critique.md, spec.md]
+nodes:
+  - id: research
+    type: agent
+    role: researcher
+    prompt: "Research users, constraints and prior art relevant to the task."
+    output: research.md
+    next: [concept]
+
+  - id: concept
+    type: agent
+    role: designer
+    prompt: "Propose a design concept with flows and key decisions."
+    output: concept.md
+    next: [critique]
+
+  - id: critique
+    type: agent
+    role: critic
+    prompt: "Critique the concept: usability gaps, edge cases and simpler alternatives."
+    output: critique.md
+    next: [spec]
+
+  - id: spec
+    type: agent
+    role: tech_writer
+    prompt: "Write the final design specification incorporating the critique."
+    output: spec.md

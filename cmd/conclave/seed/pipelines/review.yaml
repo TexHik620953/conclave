@@ -1,0 +1,18 @@
+description: "Review existing work with several specialists and summarize."
+inputs: [task]
+settings:
+  max_parallel: 5
+  outputs: [review.md, review-summary.md]
+nodes:
+  - id: review
+    type: parallel
+    roles: [security_reviewer, qa, dba, devops, frontend]
+    prompt: "Review the current workspace for your specialty. End with STATUS: PASS or STATUS: FAIL."
+    output: review.md
+    next: [summarize]
+
+  - id: summarize
+    type: agent
+    role: tech_writer
+    prompt: "Summarize the review findings and prioritize the fixes."
+    output: review-summary.md

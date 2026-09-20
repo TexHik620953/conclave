@@ -1,0 +1,13 @@
+id: controller
+title: "Pipeline Controller"
+description: "Routes work between roles and decides the next step."
+model: openai/gpt-4o-mini
+fallback: ["openrouter/anthropic/claude-3.5-sonnet", "ollama/qwen2.5-coder:7b"]
+prompt_file: prompts/controller.md
+temperature: 0.1
+tools: [read_file, list_dir, glob, grep, todo_write, todo_read, ask_user]
+permissions:
+  fs_read: true
+  fs_write: false
+  shell: false
+  network: false

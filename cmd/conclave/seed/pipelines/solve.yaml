@@ -1,0 +1,32 @@
+description: "Solve a general task: plan, execute, verify, summarize."
+inputs: [task]
+settings:
+  max_parallel: 4
+  outputs: [plan.md, result.md, summary.md]
+nodes:
+  - id: plan
+    type: agent
+    role: architect
+    prompt: "Produce a concrete plan to solve the task."
+    output: plan.md
+    next: [execute]
+
+  - id: execute
+    type: agent
+    role: senior
+    prompt: "Carry out the plan. Use the workspace tools as needed."
+    output: result.md
+    next: [verify]
+
+  - id: verify
+    type: parallel
+    roles: [qa, security_reviewer]
+    prompt: "Verify the result for your specialty. End with STATUS: PASS or STATUS: FAIL."
+    output: verification.md
+    next: [summarize]
+
+  - id: summarize
+    type: agent
+    role: tech_writer
+    prompt: "Summarize the outcome, the artifacts produced and any caveats."
+    output: summary.md

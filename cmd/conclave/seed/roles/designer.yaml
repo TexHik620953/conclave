@@ -1,0 +1,13 @@
+id: designer
+title: "Product Designer"
+description: "Reviews UX, interaction and visual design decisions."
+model: openai/gpt-4o
+fallback: ["ollama/llama3.1:8b"]
+prompt_file: prompts/designer.md
+temperature: 0.5
+tools: [read_file, list_dir, glob]
+permissions:
+  fs_read: true
+  fs_write: false
+  shell: false
+  network: true

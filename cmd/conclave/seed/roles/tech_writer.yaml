@@ -1,0 +1,13 @@
+id: tech_writer
+title: "Technical Writer"
+description: "Produces clear documentation and summaries."
+model: ollama/llama3.1:8b
+fallback: ["openai/gpt-4o-mini"]
+prompt_file: prompts/tech_writer.md
+temperature: 0.4
+tools: [read_file, list_dir, glob, grep]
+permissions:
+  fs_read: true
+  fs_write: false
+  shell: false
+  network: false

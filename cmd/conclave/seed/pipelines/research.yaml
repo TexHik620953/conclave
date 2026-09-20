@@ -1,0 +1,30 @@
+description: "Research with a research/critique loop, then write a brief."
+inputs: [task]
+settings:
+  max_parallel: 3
+  outputs: [research.md, critique.md, brief.md]
+nodes:
+  - id: iterate
+    type: loop
+    until: 'critique contains "STATUS: DONE"'
+    max_iterations: 3
+    body: [research, critique]
+    next: [brief]
+
+  - id: research
+    type: agent
+    role: researcher
+    prompt: "Answer the task. For questions about the outside world use web_search and http_fetch; only consult the local repository when the task is about this codebase. Address any critique from the previous iteration."
+    output: research.md
+
+  - id: critique
+    type: agent
+    role: critic
+    prompt: "Review the research: gaps, weak assumptions, unverified or missing sources. If more research is needed, say exactly what to investigate next. End with STATUS: DONE if the research is sufficient, or STATUS: MORE if it needs another pass."
+    output: critique.md
+
+  - id: brief
+    type: agent
+    role: tech_writer
+    prompt: "Write a concise brief that answers the task, incorporating the research and the critique."
+    output: brief.md

@@ -1,0 +1,32 @@
+description: "Write a document: outline, draft, review and finalize."
+inputs: [task]
+settings:
+  max_parallel: 3
+  outputs: [outline.md, draft.md, review.md, final.md]
+nodes:
+  - id: outline
+    type: agent
+    role: architect
+    prompt: "Produce a detailed outline for the requested document."
+    output: outline.md
+    next: [draft]
+
+  - id: draft
+    type: agent
+    role: tech_writer
+    prompt: "Write the full draft following the outline."
+    output: draft.md
+    next: [review]
+
+  - id: review
+    type: parallel
+    roles: [critic, researcher]
+    prompt: "Review the draft for your specialty. List concrete improvements."
+    output: review.md
+    next: [final]
+
+  - id: final
+    type: agent
+    role: tech_writer
+    prompt: "Revise the draft using the review feedback and produce the final document."
+    output: final.md

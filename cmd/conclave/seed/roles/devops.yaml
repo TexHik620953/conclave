@@ -1,0 +1,13 @@
+id: devops
+title: "DevOps Engineer"
+description: "Reviews build, CI/CD, deployment and operability."
+model: openai/gpt-4o-mini
+fallback: ["ollama/qwen2.5-coder:7b"]
+prompt_file: prompts/devops.md
+temperature: 0.2
+tools: [read_file, list_dir, glob, grep, run_shell]
+permissions:
+  fs_read: true
+  fs_write: false
+  shell: true
+  network: true
