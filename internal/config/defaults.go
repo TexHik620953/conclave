@@ -84,12 +84,17 @@ func (c *Config) applyDefaults() {
 			c.Settings.WebSearch.BaseURL = "https://api.exa.ai"
 		}
 	}
-	if c.Settings.WebSearch.APIKey == "" && c.Settings.WebSearch.APIKeyEnv != "" {
-		c.Settings.WebSearch.APIKey = os.Getenv(c.Settings.WebSearch.APIKeyEnv)
-	}
-	if c.Settings.WebSearch.APIKeyEnv == "" && c.Settings.WebSearch.Provider == "exa" {
-		c.Settings.WebSearch.APIKeyEnv = "EXA_API_KEY"
-		c.Settings.WebSearch.APIKey = os.Getenv("EXA_API_KEY")
+	// Resolve the API key from the environment only when no literal key was
+	// configured; never overwrite an explicit api_key with an empty env value.
+	if c.Settings.WebSearch.APIKey == "" {
+		envName := c.Settings.WebSearch.APIKeyEnv
+		if envName == "" && c.Settings.WebSearch.Provider == "exa" {
+			envName = "EXA_API_KEY"
+		}
+		if envName != "" {
+			c.Settings.WebSearch.APIKeyEnv = envName
+			c.Settings.WebSearch.APIKey = os.Getenv(envName)
+		}
 	}
 	for id, role := range c.Roles {
 		if role.ID == "" {
