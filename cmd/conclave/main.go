@@ -37,8 +37,6 @@ func main() {
 	root.SetContext(ctx)
 
 	root.AddCommand(
-		newRunCmd(),
-		newAskCmd(),
 		newServeCmd(),
 		newRolesCmd(),
 		newPipelinesCmd(),

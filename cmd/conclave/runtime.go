@@ -160,90 +160,12 @@ func (a *app) buildRoleRuntime(ctx context.Context, roleID, workspace string) (*
 	return r, nil
 }
 
-// subscribeEvents prints progress to stderr.
-func (a *app) subscribeEvents(ctx context.Context) func() {
-	ch, cancel := a.bus.Subscribe(512)
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case ev, ok := <-ch:
-				if !ok {
-					return
-				}
-				printEvent(ev)
-			}
-		}
-	}()
-	return cancel
-}
-
-func printEvent(ev event.Event) {
-	ts := ev.Time.Format("15:04:05")
-	switch ev.Type {
-	case event.RoleDelta:
-		fmt.Fprint(os.Stderr, ev.Message)
-	case event.NodeStarted:
-		fmt.Fprintf(os.Stderr, "\n[%s] ▶ %s (%s)\n", ts, ev.NodeID, ev.Message)
-	case event.NodeFinished:
-		fmt.Fprintf(os.Stderr, "\n[%s] ✓ %s: %s\n", ts, ev.NodeID, ev.Message)
-	case event.ToolCall:
-		fmt.Fprintf(os.Stderr, "\n[%s]   ⚙ %s %v\n", ts, ev.Message, ev.Data["arguments"])
-	case event.ToolResult:
-		fmt.Fprintf(os.Stderr, "[%s]   ↳ %s\n", ts, summarize(ev.Data))
-	case event.ContextUsage:
-		fmt.Fprintf(os.Stderr, "[%s]   ctx %s\n", ts, formatContext(ev.Data))
-	case event.TodosUpdated:
-		fmt.Fprintf(os.Stderr, "\n[%s] todos updated:\n%s\n", ts, renderTodos(ev.Data))
-	case event.RunStarted:
-		fmt.Fprintf(os.Stderr, "[%s] run started: %s\n", ts, ev.Message)
-	case event.RunFinished:
-		fmt.Fprintf(os.Stderr, "[%s] run finished: %s\n", ts, ev.Message)
-	case event.Error:
-		fmt.Fprintf(os.Stderr, "[%s] error: %s\n", ts, ev.Message)
+// mcpErrors returns non-fatal MCP startup errors.
+func (a *app) mcpErrors() []string {
+	if a.mcp == nil {
+		return nil
 	}
-}
-
-func formatContext(data map[string]any) string {
-	tokens, _ := data["prompt_tokens"].(int)
-	limit, _ := data["context_limit"].(int)
-	msgs, _ := data["messages"].(int)
-	if limit > 0 {
-		pct := float64(tokens) / float64(limit) * 100
-		return fmt.Sprintf("%s/%s (%.1f%%, %d msgs)", formatTokens(tokens), formatTokens(limit), pct, msgs)
-	}
-	return fmt.Sprintf("%s (limit unknown, %d msgs)", formatTokens(tokens), msgs)
-}
-
-func formatTokens(n int) string {
-	switch {
-	case n >= 1_000_000:
-		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
-	case n >= 1_000:
-		return fmt.Sprintf("%.1fk", float64(n)/1_000)
-	default:
-		return fmt.Sprintf("%d", n)
-	}
-}
-
-func renderTodos(data map[string]any) string {
-	todos, ok := data["todos"].([]tool.Todo)
-	if !ok {
-		return ""
-	}
-	return tool.RenderTodos(todos)
-}
-
-func summarize(data map[string]any) string {
-	if data == nil {
-		return ""
-	}
-	s, _ := data["content"].(string)
-	if len(s) > 200 {
-		s = s[:200] + "..."
-	}
-	return s
+	return a.mcp.Errors()
 }
 
 func newToolRegistry(env *tool.Env, mgr *mcp.Manager) *tool.Registry {

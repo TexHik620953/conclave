@@ -98,21 +98,25 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Pipeline  string            `json:"pipeline"`
-		Task      string            `json:"task"`
-		Workspace string            `json:"workspace"`
-		RunID     string            `json:"run_id"`
-		Inputs    map[string]string `json:"inputs"`
+		Pipeline    string            `json:"pipeline"`
+		Task        string            `json:"task"`
+		Workspace   string            `json:"workspace"`
+		RunID       string            `json:"run_id"`
+		ResumeRunID string            `json:"resume_run_id"`
+		Inputs      map[string]string `json:"inputs"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
-	if body.Pipeline == "" {
-		writeError(w, http.StatusBadRequest, "pipeline is required")
+	if body.Pipeline == "" && body.ResumeRunID == "" {
+		writeError(w, http.StatusBadRequest, "pipeline or resume_run_id is required")
 		return
 	}
-	id := body.RunID
+	id := body.ResumeRunID
+	if id == "" {
+		id = body.RunID
+	}
 	if id == "" {
 		id = newRunID(body.Pipeline)
 	}
@@ -125,7 +129,7 @@ func (s *Server) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 		defer cancel()
 		if _, err := deps.RunPipeline(ctx, orchestrator.RunOptions{
 			Pipeline: body.Pipeline, Task: body.Task, Workspace: body.Workspace,
-			Inputs: body.Inputs, RunID: id,
+			Inputs: body.Inputs, RunID: id, ResumeRunID: body.ResumeRunID,
 		}); err != nil {
 			log.Info("run finished with error", "run_id", id, "error", err.Error())
 		}
