@@ -18,6 +18,9 @@ var (
 	flagDataDir    string
 )
 
+// version is injected at build time via -ldflags "-X main.version=...".
+var version = "dev"
+
 func main() {
 	root := &cobra.Command{
 		Use:           "conclave",

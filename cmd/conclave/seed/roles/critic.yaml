@@ -10,4 +10,4 @@ permissions:
   fs_read: true
   fs_write: false
   shell: false
-  network: false
+  network: true

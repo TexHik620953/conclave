@@ -22,6 +22,7 @@ type fakeDeps struct {
 	cfg   *config.Config
 	bus   *event.Bus
 	ranCh chan orchestrator.RunOptions
+	block bool
 }
 
 func (f *fakeDeps) Config() *config.Config { return f.cfg }
@@ -34,10 +35,19 @@ func (f *fakeDeps) GetRun(id string) (*store.Run, error) {
 func (f *fakeDeps) ListNodes(string) ([]store.NodeRecord, error)        { return nil, nil }
 func (f *fakeDeps) ListArtifacts(string) ([]store.Artifact, error)      { return nil, nil }
 func (f *fakeDeps) ListEvents(string, int) ([]store.EventRecord, error) { return nil, nil }
-func (f *fakeDeps) ArtifactContent(string, string) (string, error)      { return "", nil }
-func (f *fakeDeps) Bus() *event.Bus                                     { return f.bus }
+func (f *fakeDeps) ListRecentEvents(string, int) ([]store.EventRecord, error) {
+	return nil, nil
+}
+func (f *fakeDeps) ArtifactContent(string, string) (string, error) { return "", nil }
+func (f *fakeDeps) SetRunStatus(string, string) error              { return nil }
+func (f *fakeDeps) RevertFrom(string, string) error                { return nil }
+func (f *fakeDeps) Bus() *event.Bus                                { return f.bus }
 func (f *fakeDeps) RunPipeline(ctx context.Context, opts orchestrator.RunOptions) (*orchestrator.RunResult, error) {
 	f.ranCh <- opts
+	if f.block {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	f.bus.Publish(event.Event{Type: event.RunStarted, RunID: opts.RunID, Message: opts.Pipeline})
 	return &orchestrator.RunResult{RunID: opts.RunID, Status: "completed"}, nil
 }
@@ -127,6 +137,88 @@ func TestAuthRequired(t *testing.T) {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
 	resp.Body.Close()
+}
+
+func TestPauseResumeRevert(t *testing.T) {
+	srv, deps := testServer("")
+	deps.block = true
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	payload, _ := json.Marshal(map[string]any{"pipeline": "feature", "task": "x"})
+	resp, err := http.Post(ts.URL+"/api/runs", "application/json", bytes.NewReader(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out map[string]string
+	json.NewDecoder(resp.Body).Decode(&out)
+	resp.Body.Close()
+	id := out["run_id"]
+	if id == "" {
+		t.Fatal("no run id")
+	}
+	<-deps.ranCh
+
+	resp, _ = http.Post(ts.URL+"/api/runs/"+id+"/pause", "application/json", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("pause status = %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+	time.Sleep(150 * time.Millisecond)
+
+	body, _ := json.Marshal(map[string]string{"node_id": "a"})
+	resp, _ = http.Post(ts.URL+"/api/runs/"+id+"/revert", "application/json", bytes.NewReader(body))
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("revert status = %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	resp, _ = http.Post(ts.URL+"/api/runs/"+id+"/resume", "application/json", nil)
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("resume status = %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+	<-deps.ranCh
+
+	http.Post(ts.URL+"/api/runs/"+id+"/pause", "application/json", nil)
+}
+
+func TestFollowupAndAnswerEndpoints(t *testing.T) {
+	srv, deps := testServer("")
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	// answer for an unknown question is accepted=false
+	body, _ := json.Marshal(map[string]any{"id": "nope", "selected": []string{"A"}})
+	resp, err := http.Post(ts.URL+"/api/runs/run-x/answer", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ansOut map[string]bool
+	json.NewDecoder(resp.Body).Decode(&ansOut)
+	resp.Body.Close()
+	if ansOut["accepted"] {
+		t.Fatal("unknown question should not be accepted")
+	}
+
+	// follow-up resumes the run
+	fu, _ := json.Marshal(map[string]any{"prompt": "also cover migrations"})
+	resp, err = http.Post(ts.URL+"/api/runs/run-x/followup", "application/json", bytes.NewReader(fu))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("followup status = %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+	select {
+	case opts := <-deps.ranCh:
+		if opts.Followup != "also cover migrations" || opts.ResumeRunID != "run-x" {
+			t.Fatalf("unexpected resume opts: %+v", opts)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("follow-up did not start a run")
+	}
 }
 
 func TestWebSocketStreamsEvents(t *testing.T) {

@@ -79,6 +79,17 @@ func (c *Client) Complete(ctx context.Context, req Request) (*Response, error) {
 		return nil, fmt.Errorf("llm: no model specified")
 	}
 
+	// Once any content has been streamed to the caller, falling back to another
+	// model would duplicate or interleave output, so we stop instead.
+	emitted := false
+	if req.OnDelta != nil {
+		inner := req.OnDelta
+		req.OnDelta = func(d provider.Delta) {
+			emitted = true
+			inner(d)
+		}
+	}
+
 	var lastErr error
 	for i, ref := range targets {
 		target, err := provider.Resolve(ref)
@@ -103,6 +114,9 @@ func (c *Client) Complete(ctx context.Context, req Request) (*Response, error) {
 			}, nil
 		}
 		lastErr = fmt.Errorf("%s: %w", ref, err)
+		if emitted {
+			return nil, fmt.Errorf("llm: streaming failed after partial output: %w", lastErr)
+		}
 		if i < len(targets)-1 {
 			continue
 		}

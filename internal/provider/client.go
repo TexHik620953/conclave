@@ -109,24 +109,21 @@ func (c *Client) ChatStream(ctx context.Context, req ChatRequest, onDelta func(D
 
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || !strings.HasPrefix(line, "data:") {
-			continue
-		}
-		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if payload == "[DONE]" {
-			break
+
+	handle := func(payload string) {
+		payload = strings.TrimSpace(payload)
+		if payload == "" || payload == "[DONE]" {
+			return
 		}
 		var chunk streamChunk
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
-			continue
+			return
 		}
 		if chunk.Usage != nil {
 			out.Usage = *chunk.Usage
 		}
 		if len(chunk.Choices) == 0 {
-			continue
+			return
 		}
 		ch := chunk.Choices[0]
 		if ch.FinishReason != "" {
@@ -137,11 +134,16 @@ func (c *Client) ChatStream(ctx context.Context, req ChatRequest, onDelta func(D
 			agg.Content += d.Content
 		}
 		for _, tc := range ch.Delta.ToolCalls {
-			idx := tc.Index
-			pos, ok := toolIndex[idx]
+			pos, ok := toolIndex[tc.Index]
+			// Providers that omit `index` send every tool call at index 0. If a
+			// distinct id arrives for an entry that already has one, treat it as
+			// a new tool call rather than appending to the previous one.
+			if ok && tc.ID != "" && agg.ToolCalls[pos].ID != "" && agg.ToolCalls[pos].ID != tc.ID {
+				ok = false
+			}
 			if !ok {
 				pos = len(agg.ToolCalls)
-				toolIndex[idx] = pos
+				toolIndex[tc.Index] = pos
 				agg.ToolCalls = append(agg.ToolCalls, ToolCall{Type: "function"})
 			}
 			if tc.ID != "" {
@@ -166,6 +168,37 @@ func (c *Client) ChatStream(ctx context.Context, req ChatRequest, onDelta func(D
 		if onDelta != nil && (d.Content != "" || len(d.ToolCalls) > 0 || d.Reasoning != "") {
 			onDelta(d)
 		}
+	}
+
+	// SSE frames may span multiple `data:` lines; accumulate until a blank line.
+	var dataBuf strings.Builder
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			if dataBuf.Len() > 0 {
+				handle(dataBuf.String())
+				dataBuf.Reset()
+			}
+			continue
+		}
+		if strings.HasPrefix(line, ":") {
+			continue // comment/keep-alive
+		}
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		payload := strings.TrimPrefix(line, "data:")
+		payload = strings.TrimPrefix(payload, " ")
+		if dataBuf.Len() > 0 {
+			dataBuf.WriteByte('\n')
+		}
+		dataBuf.WriteString(payload)
+		if payload == "[DONE]" {
+			break
+		}
+	}
+	if dataBuf.Len() > 0 {
+		handle(dataBuf.String())
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("%s: reading stream: %w", c.name, err)

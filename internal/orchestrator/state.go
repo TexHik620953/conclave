@@ -59,6 +59,14 @@ func (s *State) completedNodes() map[string]bool {
 	return out
 }
 
+// ClearCompleted forgets which nodes were completed so the whole pipeline runs
+// again while still seeing the restored outputs as context.
+func (s *State) ClearCompleted() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.completed = map[string]bool{}
+}
+
 // Artifact returns an artifact's content.
 func (s *State) Artifact(name string) string {
 	s.mu.RLock()
@@ -109,6 +117,13 @@ func (s *State) SetIterations(i int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Iterations = i
+}
+
+// CurrentIterations returns the current loop iteration under the state lock.
+func (s *State) CurrentIterations() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.Iterations
 }
 
 // AddCost accumulates USD cost.

@@ -1,0 +1,18 @@
+description: "Controller-driven: the manager decides which roles to run, iteratively, until it finishes."
+inputs: [task]
+settings:
+  max_parallel: 4
+  outputs: [result.md]
+nodes:
+  - id: lead
+    type: supervisor
+    role: controller
+    prompt: >-
+      You are the lead engineer for this task. Delegate work to the specialist
+      roles with the `delegate` and `delegate_parallel` tools, review their
+      results, and iterate until the task is complete. Use `ask_user` only when
+      a decision would materially change the outcome. When done, call `finish`
+      with a concise summary of what was produced and any remaining risks.
+    max_steps: 12
+    # Omit `roles` to give the controller the entire role pool.
+    output: result.md

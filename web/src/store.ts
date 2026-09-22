@@ -17,7 +17,17 @@ export interface Todo {
   priority?: string
 }
 
-export type EntryKind = 'node' | 'assistant' | 'tool' | 'event' | 'error' | 'context'
+export type EntryKind = 'node' | 'assistant' | 'tool' | 'event' | 'error' | 'context' | 'question' | 'user'
+
+export interface QuestionState {
+  id: string
+  header?: string
+  question: string
+  options: { label: string; description?: string }[]
+  multiple: boolean
+  allowCustom: boolean
+  answered: boolean
+}
 
 export interface Entry {
   id: number
@@ -29,6 +39,7 @@ export interface Entry {
   text?: string
   done?: boolean
   tool?: ToolState
+  question?: QuestionState
   message?: string
   ctxTokens?: number
   ctxLimit?: number
@@ -45,6 +56,7 @@ export interface NodeInfo {
 
 export interface RunState {
   id: string
+  sessionId?: string
   pipeline: string
   task: string
   status: string
@@ -75,9 +87,20 @@ function newRun(id: string, pipeline = '', task = ''): RunState {
   }
 }
 
+export interface Session {
+  id: string
+  title: string
+  pipeline: string
+  workspace: string
+  created_at: string
+  updated_at: string
+}
+
 export const state = reactive({
   config: { pipelines: [] as any[], roles: [] as any[] },
   history: [] as any[],
+  sessions: [] as Session[],
+  currentSessionId: '',
   runs: {} as Record<string, RunState>,
   currentRunId: '',
   connected: false,
@@ -107,10 +130,75 @@ export async function loadHistory() {
   state.history = await api.listRuns()
 }
 
-export function startRun(runId: string, pipeline: string, task: string) {
-  state.runs[runId] = newRun(runId, pipeline, task)
+export function startRun(runId: string, pipeline: string, task: string, sessionId = '') {
+  const run = newRun(runId, pipeline, task)
+  run.sessionId = sessionId
+  state.runs[runId] = run
   state.currentRunId = runId
+  if (sessionId) state.currentSessionId = sessionId
   state.tab = 'run'
+}
+
+// newChat returns to the landing state so the user can start a fresh session.
+export function newChat() {
+  state.currentSessionId = ''
+  state.currentRunId = ''
+  state.tab = 'run'
+}
+
+export async function loadSessions() {
+  try {
+    state.sessions = (await api.listSessions()) as Session[]
+  } catch {
+    /* ignore */
+  }
+}
+
+// openSession loads a session's latest run so the chat continues where it left off.
+export async function openSession(sessionId: string) {
+  state.currentSessionId = sessionId
+  const data: any = await api.getSession(sessionId)
+  const runs: any[] = data.runs || []
+  if (runs.length === 0) {
+    state.currentRunId = ''
+    state.tab = 'run'
+    return
+  }
+  const last = runs[runs.length - 1]
+  await hydrateRun(last.id)
+  const run = state.runs[last.id]
+  if (run) run.sessionId = sessionId
+  state.currentRunId = last.id
+  state.tab = 'run'
+}
+
+// sendMessage posts a chat message to the current session, starting a run when
+// none is active and queuing it when one is.
+export async function sendMessage(content: string, pipeline = '', workspace = '') {
+  if (!state.currentSessionId) {
+    const created: any = await api.createSession({ pipeline, workspace })
+    state.currentSessionId = created.id
+    state.sessions.unshift(created)
+  }
+  const res: any = await api.postMessage(state.currentSessionId, { content, pipeline, workspace })
+  if (res.run_id) {
+    if (res.queued) {
+      // The running run will pick it up; the server echoes a user.message event.
+      return res.run_id
+    }
+    startRun(res.run_id, pipeline, content, state.currentSessionId)
+    return res.run_id
+  }
+  return ''
+}
+
+export async function deleteSession(sessionId: string) {
+  await api.deleteSession(sessionId)
+  state.sessions = state.sessions.filter((s) => s.id !== sessionId)
+  if (state.currentSessionId === sessionId) {
+    state.currentSessionId = ''
+    state.currentRunId = ''
+  }
 }
 
 function lastAssistant(run: RunState, node: string, role: string): Entry | undefined {
@@ -119,6 +207,11 @@ function lastAssistant(run: RunState, node: string, role: string): Entry | undef
     if (e.kind === 'assistant' && e.node === node && e.role === role) return e
   }
   return undefined
+}
+
+function lastOpenAssistant(run: RunState, node: string, role: string): Entry | undefined {
+  const e = lastAssistant(run, node, role)
+  return e && !e.done ? e : undefined
 }
 
 export function applyEvent(ev: any) {
@@ -157,8 +250,8 @@ export function applyEvent(ev: any) {
       push(run, { kind: 'event', node: ev.node_id, message: `${ev.node_id}: ${ev.message}` })
       break
     case 'role.delta': {
-      let e = lastAssistant(run, ev.node_id, ev.role)
-      if (!e || e.done) {
+      let e = lastOpenAssistant(run, ev.node_id, ev.role)
+      if (!e) {
         e = push(run, { kind: 'assistant', node: ev.node_id, role: ev.role, model: ev.model, text: '', done: false })
       }
       e.text = (e.text || '') + (ev.message || '')
@@ -167,7 +260,7 @@ export function applyEvent(ev: any) {
       break
     }
     case 'role.message': {
-      let e = lastAssistant(run, ev.node_id, ev.role)
+      let e = lastOpenAssistant(run, ev.node_id, ev.role)
       if (!e) {
         e = push(run, { kind: 'assistant', node: ev.node_id, role: ev.role, model: ev.model, text: '', done: false })
       }
@@ -223,6 +316,25 @@ export function applyEvent(ev: any) {
     case 'todos.updated':
       run.todos = ev.data?.todos || []
       break
+    case 'user.message':
+      push(run, { kind: 'user', role: 'user', message: ev.message })
+      break
+    case 'user.question':
+      push(run, {
+        kind: 'question',
+        node: ev.node_id,
+        role: ev.role,
+        question: {
+          id: ev.data?.id,
+          header: ev.data?.header,
+          question: ev.data?.question || ev.message,
+          options: ev.data?.options || [],
+          multiple: !!ev.data?.multiple,
+          allowCustom: !!ev.data?.allow_custom,
+          answered: false,
+        },
+      })
+      break
     case 'error':
       push(run, { kind: 'error', message: ev.message })
       break
@@ -239,8 +351,23 @@ async function refreshArtifacts(run: RunState) {
   }
 }
 
-export async function hydrateRun(id: string) {
-  const data: any = await api.getRun(id)
+// revertLocal drops timeline entries from a reverted node onward so a resumed
+// run does not mix with the old output.
+export function revertLocal(runId: string, nodeId: string) {
+  const run = state.runs[runId]
+  if (!run) return
+  const idx = run.entries.findIndex((e) => e.node === nodeId)
+  if (idx >= 0) run.entries.splice(idx)
+  const oi = run.nodeOrder.indexOf(nodeId)
+  if (oi >= 0) {
+    for (let i = oi; i < run.nodeOrder.length; i++) run.nodes[run.nodeOrder[i]] = 'pending'
+  }
+  run.finalText = ''
+  run.status = 'paused'
+  run.active = false
+}
+
+export async function hydrateRun(id: string) {  const data: any = await api.getRun(id)
   const run = ensureRun(id, data.run?.pipeline, data.run?.task)
   run.pipeline = data.run?.pipeline || run.pipeline
   run.task = data.run?.task || run.task
@@ -262,11 +389,61 @@ export async function hydrateRun(id: string) {
   }
   for (const ev of data.events || []) {
     const t = Date.parse(ev.time) || Date.now()
-    const entry: Entry = { id: ++seq, time: t, kind: 'event', node: ev.node_id, role: ev.role, message: ev.message }
-    if (ev.type === 'node.started') { entry.kind = 'node'; if (!run.nodes[ev.node_id]) run.nodeOrder.push(ev.node_id); run.nodes[ev.node_id] = 'done' }
-    else if (ev.type === 'role.message') { entry.kind = 'assistant'; entry.text = ev.message; entry.done = true; run.finalText = ev.message }
-    else if (ev.type === 'error') { entry.kind = 'error' }
-    else if (ev.type === 'context.usage') { entry.kind = 'context' }
+    const entry: Entry = { id: ++seq, time: t, kind: 'event', node: ev.node_id, role: ev.role, model: ev.model, message: ev.message }
+    if (ev.type === 'node.started') {
+      entry.kind = 'node'
+      if (!run.nodes[ev.node_id]) run.nodeOrder.push(ev.node_id)
+      const info = run.nodeInfo[ev.node_id] || {}
+      if (ev.data?.role || ev.role) info.role = ev.data?.role || ev.role
+      if (ev.data?.model || ev.model) info.model = ev.data?.model || ev.model
+      if (ev.data?.prompt) info.prompt = ev.data.prompt
+      if (ev.data?.context) info.context = ev.data.context
+      if (ev.data?.tools) info.tools = ev.data.tools
+      run.nodeInfo[ev.node_id] = info
+    } else if (ev.type === 'node.finished') {
+      if (run.nodeInfo[ev.node_id]) run.nodeInfo[ev.node_id].status = 'done'
+      if (run.nodes[ev.node_id] !== 'running') run.nodes[ev.node_id] = 'done'
+    } else if (ev.type === 'role.message') {
+      entry.kind = 'assistant'; entry.text = ev.message; entry.done = true; run.finalText = ev.message
+    } else if (ev.type === 'tool.call') {
+      entry.kind = 'tool'
+      entry.tool = { id: ev.data?.id || `x${entry.id}`, name: ev.data?.name || ev.message, args: ev.data?.arguments || '', pending: true }
+    } else if (ev.type === 'tool.result') {
+      const id = ev.data?.id
+      let matched = false
+      for (let i = run.entries.length - 1; i >= 0; i--) {
+        const tl = run.entries[i].tool
+        if (tl && tl.pending && (tl.id === id || tl.name === (ev.data?.name || ev.message))) {
+          tl.result = ev.data?.content || ''
+          tl.isError = !!ev.data?.is_error
+          tl.pending = false
+          matched = true
+          break
+        }
+      }
+      if (matched) continue
+      entry.kind = 'tool'
+      entry.tool = { id: id || `x${entry.id}`, name: ev.data?.name || ev.message, args: '', result: ev.data?.content || '', isError: !!ev.data?.is_error, pending: false }
+    } else if (ev.type === 'user.message') {
+      entry.kind = 'user'
+    } else if (ev.type === 'user.question') {
+      entry.kind = 'question'
+      entry.question = {
+        id: ev.data?.id, header: ev.data?.header, question: ev.data?.question || ev.message,
+        options: ev.data?.options || [], multiple: !!ev.data?.multiple,
+        allowCustom: !!ev.data?.allow_custom, answered: false,
+      }
+    } else if (ev.type === 'error') {
+      entry.kind = 'error'
+    } else if (ev.type === 'context.usage') {
+      entry.kind = 'context'
+      entry.ctxTokens = ev.data?.prompt_tokens
+      entry.ctxLimit = ev.data?.context_limit
+      run.ctxTokens = ev.data?.prompt_tokens || run.ctxTokens
+      run.ctxLimit = ev.data?.context_limit || run.ctxLimit
+    } else if (ev.type === 'role.delta') {
+      continue
+    }
     run.entries.push(entry)
   }
   return data

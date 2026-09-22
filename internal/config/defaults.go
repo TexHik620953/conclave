@@ -15,6 +15,9 @@ func (c *Config) applyDefaults() {
 		}
 		c.Providers[name] = p
 	}
+	if c.Settings.DefaultPipeline == "" {
+		c.Settings.DefaultPipeline = "auto"
+	}
 	if c.Settings.MaxParallel <= 0 {
 		c.Settings.MaxParallel = 4
 	}
@@ -181,6 +184,12 @@ func (c *Config) Validate() error {
 				return fmt.Errorf("role %s: unknown provider %q in model %q", name, prov, ref)
 			}
 		}
+		net := role.Permissions.Allowed("network", c.defaultNetwork())
+		for _, t := range role.Tools {
+			if (t == "http_fetch" || t == "web_search") && !net {
+				return fmt.Errorf("role %s: tool %q requires network but permissions.network is false", name, t)
+			}
+		}
 	}
 	for name, p := range c.Pipelines {
 		if err := c.validatePipeline(name, p); err != nil {
@@ -201,7 +210,7 @@ func (c *Config) validatePipeline(name string, p Pipeline) error {
 		}
 		ids[n.ID] = true
 		switch n.Type {
-		case "agent", "parallel", "controller", "loop", "gate", "transform":
+		case "agent", "parallel", "controller", "supervisor", "gate", "transform":
 		default:
 			return fmt.Errorf("pipeline %s: node %s: unknown type %q", name, n.ID, n.Type)
 		}
@@ -233,11 +242,6 @@ func (c *Config) validatePipeline(name string, p Pipeline) error {
 				return fmt.Errorf("pipeline %s: node %s: next references unknown node %q", name, n.ID, next)
 			}
 		}
-		for _, b := range n.Body {
-			if !ids[b] {
-				return fmt.Errorf("pipeline %s: node %s: body references unknown node %q", name, n.ID, b)
-			}
-		}
 		for _, c := range n.Choices {
 			if !ids[c] {
 				return fmt.Errorf("pipeline %s: node %s: choice %q is not a node", name, n.ID, c)
@@ -254,6 +258,13 @@ func (c *Config) validatePipeline(name string, p Pipeline) error {
 }
 
 func boolPtr(b bool) *bool { return &b }
+
+func (c *Config) defaultNetwork() bool {
+	if c.Settings.Defaults.Network == nil {
+		return true
+	}
+	return *c.Settings.Defaults.Network
+}
 
 func validEnvName(s string) bool {
 	if s == "" {

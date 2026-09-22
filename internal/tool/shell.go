@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -33,7 +34,8 @@ func (t *shellTool) Execute(ctx context.Context, args json.RawMessage) (Result, 
 	if err := json.Unmarshal(args, &in); err != nil {
 		return Result{}, err
 	}
-	if err := t.env.checkCommand(in.Command); err != nil {
+	argv, err := t.env.buildArgv(in.Command)
+	if err != nil {
 		return Result{Content: err.Error(), IsError: true}, nil
 	}
 	timeout := t.env.CommandTimeout
@@ -45,7 +47,7 @@ func (t *shellTool) Execute(ctx context.Context, args json.RawMessage) (Result, 
 	}
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cmd := exec.CommandContext(runCtx, "sh", "-c", in.Command)
+	cmd := exec.CommandContext(runCtx, argv[0], argv[1:]...)
 	if t.env.Workspace != "" {
 		cmd.Dir = t.env.Workspace
 	}
@@ -63,25 +65,47 @@ func (t *shellTool) Execute(ctx context.Context, args json.RawMessage) (Result, 
 	return Result{Content: result}, nil
 }
 
-func (e *Env) checkCommand(command string) error {
+// shellMeta lists characters that let a command chain, redirect, substitute or
+// background another command. They are rejected outright when an allowlist is
+// configured, so an allowed base command cannot smuggle in a second one.
+const shellMeta = ";&|<>`$\n\r\\\"'"
+
+// buildArgv validates a command against the shell policy and returns the argv
+// to execute. Without an allowlist the command runs through `sh -c`; with an
+// allowlist it is split into argv and executed directly (no shell), which
+// makes the allowlist meaningful.
+func (e *Env) buildArgv(command string) ([]string, error) {
 	trimmed := strings.TrimSpace(command)
+	if trimmed == "" {
+		return nil, fmt.Errorf("empty command")
+	}
+	if strings.ContainsRune(trimmed, 0) {
+		return nil, fmt.Errorf("command contains NUL byte")
+	}
+	lower := strings.ToLower(trimmed)
 	for _, denied := range e.DeniedCommands {
-		if denied != "" && strings.Contains(trimmed, denied) {
-			return fmt.Errorf("command denied by policy: %q", denied)
+		if denied != "" && strings.Contains(lower, strings.ToLower(denied)) {
+			return nil, fmt.Errorf("command denied by policy: %q", denied)
 		}
 	}
 	if len(e.AllowedCommands) == 0 {
-		return nil
+		return []string{"sh", "-c", trimmed}, nil
+	}
+	if strings.ContainsAny(trimmed, shellMeta) {
+		return nil, fmt.Errorf("shell metacharacters are not allowed when an allowlist is configured")
 	}
 	fields := strings.Fields(trimmed)
-	if len(fields) == 0 {
-		return fmt.Errorf("empty command")
-	}
 	base := fields[0]
 	for _, allowed := range e.AllowedCommands {
-		if base == allowed {
-			return nil
+		if base == allowed || filepath.Base(base) == allowed {
+			return fields, nil
 		}
 	}
-	return fmt.Errorf("command %q is not in the allowlist", base)
+	return nil, fmt.Errorf("command %q is not in the allowlist", base)
+}
+
+// checkCommand reports whether a command would pass the shell policy.
+func (e *Env) checkCommand(command string) error {
+	_, err := e.buildArgv(command)
+	return err
 }

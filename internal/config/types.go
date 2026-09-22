@@ -16,22 +16,23 @@ type Config struct {
 
 // Settings holds process-wide defaults.
 type Settings struct {
-	DefaultModel  string            `yaml:"default_model"`
-	Controller    string            `yaml:"controller"`
-	MaxParallel   int               `yaml:"max_parallel"`
-	MaxIterations int               `yaml:"max_iterations"`
-	MaxTokens     int               `yaml:"max_tokens"`
-	MaxContext    int               `yaml:"max_context_bytes"`
-	Timeout       Duration          `yaml:"timeout"`
-	Workspace     string            `yaml:"workspace"`
-	Env           map[string]string `yaml:"env"`
-	Defaults      ToolDefaults      `yaml:"defaults"`
-	ModelLimits   map[string]int    `yaml:"model_limits"`
-	OnNoUser      string            `yaml:"on_no_user"`
-	Retry         Retry             `yaml:"retry"`
-	ModelPrices   map[string]Price  `yaml:"model_prices"`
-	BudgetUSD     float64           `yaml:"budget_usd"`
-	OnBudget      string            `yaml:"on_budget"`
+	DefaultModel    string            `yaml:"default_model"`
+	DefaultPipeline string            `yaml:"default_pipeline"`
+	Controller      string            `yaml:"controller"`
+	MaxParallel     int               `yaml:"max_parallel"`
+	MaxIterations   int               `yaml:"max_iterations"`
+	MaxTokens       int               `yaml:"max_tokens"`
+	MaxContext      int               `yaml:"max_context_bytes"`
+	Timeout         Duration          `yaml:"timeout"`
+	Workspace       string            `yaml:"workspace"`
+	Env             map[string]string `yaml:"env"`
+	Defaults        ToolDefaults      `yaml:"defaults"`
+	ModelLimits     map[string]int    `yaml:"model_limits"`
+	OnNoUser        string            `yaml:"on_no_user"`
+	Retry           Retry             `yaml:"retry"`
+	ModelPrices     map[string]Price  `yaml:"model_prices"`
+	BudgetUSD       float64           `yaml:"budget_usd"`
+	OnBudget        string            `yaml:"on_budget"`
 
 	// SummarizeThreshold (0..1) triggers context summarization when the
 	// estimated prompt size reaches this fraction of the model's limit.
@@ -162,7 +163,7 @@ type PipelineSettings struct {
 // Node is one unit of work in a pipeline.
 type Node struct {
 	ID      string   `yaml:"id"`
-	Type    string   `yaml:"type"` // agent|parallel|controller|loop|gate|transform
+	Type    string   `yaml:"type"` // agent|parallel|controller|supervisor|gate|transform
 	Role    string   `yaml:"role"`
 	Roles   []string `yaml:"roles"`
 	Model   string   `yaml:"model"`
@@ -172,10 +173,8 @@ type Node struct {
 	Output  string   `yaml:"output"`
 	Choices []string `yaml:"choices"`
 
-	// loop
-	Until   string   `yaml:"until"`
-	Body    []string `yaml:"body"`
-	MaxIter int      `yaml:"max_iterations"`
+	// supervisor: the controller LLM decides which roles to run, step by step.
+	MaxSteps int `yaml:"max_steps"`
 
 	// gate
 	Condition string `yaml:"condition"`

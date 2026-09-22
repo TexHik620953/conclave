@@ -31,7 +31,7 @@ func newMCPCmd() *cobra.Command {
 			for _, e := range a.mcpErrors() {
 				fmt.Fprintln(os.Stderr, "warning:", e)
 			}
-			srv := &mcp.Server{Name: "conclave", Version: "0.1.0", In: os.Stdin, Out: os.Stdout}
+			srv := &mcp.Server{Name: "conclave", Version: version, In: os.Stdin, Out: os.Stdout}
 			a.engine.Asker = &elicitationAsker{srv: srv}
 			registerMCPTools(srv, a)
 			return srv.Serve(ctx)
@@ -153,13 +153,13 @@ func registerMCPTools(srv *mcp.Server, a *app) {
 
 	srv.AddTool(mcp.ToolSpec{
 		Name:        "run_pipeline",
-		Description: "Run a multi-role pipeline on a task and return its artifacts.",
+		Description: "Run a task with the multi-role team. The controller decides which roles to run; a pipeline is optional and defaults to 'auto'.",
 		Schema: objSchema(map[string]any{
-			"pipeline":  map[string]any{"type": "string", "description": "Pipeline name."},
+			"pipeline":  map[string]any{"type": "string", "description": "Optional pipeline name; defaults to the controller-driven 'auto'."},
 			"task":      map[string]any{"type": "string", "description": "Task description."},
 			"workspace": map[string]any{"type": "string", "description": "Workspace directory."},
 			"inputs":    map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}},
-		}, "pipeline", "task"),
+		}, "task"),
 		Handler: func(ctx context.Context, args json.RawMessage) (*mcp.CallToolResult, error) {
 			var in struct {
 				Pipeline  string            `json:"pipeline"`

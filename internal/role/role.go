@@ -37,14 +37,20 @@ type Runtime struct {
 	Tools         *tool.Registry
 	MaxIterations int
 	Bus           *event.Bus
-	RunID         string
-	NodeID        string
-	Model         string
-	Fallback      []string
-	ContextLimit  int
-	OnDelta       func(provider.Delta)
-	BeforeCall    func() error
-	AfterCall     func(providerName, model string, usage provider.Usage)
+	// Emit, when set, receives role events that should be persisted (messages,
+	// tool calls/results, context usage). Deltas are always sent to Bus only.
+	Emit         func(event.Event)
+	RunID        string
+	NodeID       string
+	Model        string
+	Fallback     []string
+	ContextLimit int
+	OnDelta      func(provider.Delta)
+	BeforeCall   func() error
+	AfterCall    func(providerName, model string, usage provider.Usage)
+	// Inbox drains user messages queued while the run is active. They are
+	// injected as user turns between iterations.
+	Inbox func() []string
 
 	SummarizeThreshold float64
 	SummarizerModel    string
@@ -119,6 +125,14 @@ func (r *Runtime) Run(ctx context.Context, in Input) (*Result, error) {
 	result := &Result{Model: r.Model}
 	for i := 0; i < maxIter; i++ {
 		result.Iterations = i + 1
+		if r.Inbox != nil {
+			for _, m := range r.Inbox() {
+				messages = append(messages, provider.Message{
+					Role:    "user",
+					Content: "[Message from the user, sent during the run]\n" + m,
+				})
+			}
+		}
 		if r.BeforeCall != nil {
 			if err := r.BeforeCall(); err != nil {
 				return nil, err
@@ -164,7 +178,7 @@ func (r *Runtime) Run(ctx context.Context, in Input) (*Result, error) {
 		result.ContextTokens = ctxTokens
 		result.ContextLimit = r.ContextLimit
 		if r.Bus != nil {
-			r.Bus.Publish(r.event(event.ContextUsage, resp.Model, "", map[string]any{
+			r.publish(r.event(event.ContextUsage, resp.Model, "", map[string]any{
 				"prompt_tokens":     ctxTokens,
 				"completion_tokens": resp.Usage.CompletionTokens,
 				"total_tokens":      resp.Usage.TotalTokens,
@@ -179,7 +193,7 @@ func (r *Runtime) Run(ctx context.Context, in Input) (*Result, error) {
 		if assistant.Content != "" {
 			result.Content = assistant.Content
 			if r.Bus != nil {
-				r.Bus.Publish(r.event(event.RoleMessage, resp.Model, assistant.Content, nil))
+				r.publish(r.event(event.RoleMessage, resp.Model, assistant.Content, nil))
 			}
 		}
 		if len(assistant.ToolCalls) == 0 {
@@ -193,7 +207,7 @@ func (r *Runtime) Run(ctx context.Context, in Input) (*Result, error) {
 				args = json.RawMessage("{}")
 			}
 			if r.Bus != nil {
-				r.Bus.Publish(r.event(event.ToolCall, resp.Model, tc.Function.Name, map[string]any{
+				r.publish(r.event(event.ToolCall, resp.Model, tc.Function.Name, map[string]any{
 					"id":        tc.ID,
 					"name":      tc.Function.Name,
 					"arguments": string(args),
@@ -206,7 +220,7 @@ func (r *Runtime) Run(ctx context.Context, in Input) (*Result, error) {
 				res = tool.Result{Content: "no tools available", IsError: true}
 			}
 			if r.Bus != nil {
-				r.Bus.Publish(r.event(event.ToolResult, resp.Model, tc.Function.Name, map[string]any{
+				r.publish(r.event(event.ToolResult, resp.Model, tc.Function.Name, map[string]any{
 					"id":       tc.ID,
 					"name":     tc.Function.Name,
 					"is_error": res.IsError,
@@ -248,7 +262,7 @@ func (r *Runtime) Run(ctx context.Context, in Input) (*Result, error) {
 	result.Messages = messages
 	if strings.TrimSpace(result.Content) != "" {
 		if r.Bus != nil {
-			r.Bus.Publish(r.event(event.Error, result.Model,
+			r.publish(r.event(event.Error, result.Model,
 				fmt.Sprintf("reached %d iterations; returned a final answer", maxIter), nil))
 		}
 		return result, nil
@@ -266,6 +280,25 @@ func (r *Runtime) event(t event.Type, model, message string, data map[string]any
 		Model:   model,
 		Message: message,
 		Data:    data,
+	}
+}
+
+// publish sends an event through the persistence hook when available, falling
+// back to the in-process bus.
+func (r *Runtime) publish(ev event.Event) {
+	if r.Emit != nil {
+		r.Emit(ev)
+		return
+	}
+	if r.Bus != nil {
+		r.Bus.Publish(ev)
+	}
+}
+
+// publishDelta streams a token delta; deltas are never persisted.
+func (r *Runtime) publishDelta(ev event.Event) {
+	if r.Bus != nil {
+		r.Bus.Publish(ev)
 	}
 }
 
@@ -308,7 +341,7 @@ func (r *Runtime) compact(ctx context.Context, messages []provider.Message) []pr
 	out = append(out, provider.Message{Role: "user", Content: "[Summary of earlier conversation]\n" + summary})
 	out = append(out, messages[cut:]...)
 	if r.Bus != nil {
-		r.Bus.Publish(r.event(event.Summarized, r.Model, fmt.Sprintf("summarized %d messages", len(middle)), nil))
+		r.publish(r.event(event.Summarized, r.Model, fmt.Sprintf("summarized %d messages", len(middle)), nil))
 	}
 	return out
 }
@@ -325,6 +358,11 @@ func (r *Runtime) summarize(ctx context.Context, msgs []provider.Message) (strin
 	if model == "" {
 		model = r.Model
 	}
+	if r.BeforeCall != nil {
+		if err := r.BeforeCall(); err != nil {
+			return "", err
+		}
+	}
 	resp, err := r.LLM.Complete(ctx, llm.Request{
 		Model: model,
 		Messages: []provider.Message{
@@ -335,6 +373,9 @@ func (r *Runtime) summarize(ctx context.Context, msgs []provider.Message) (strin
 	})
 	if err != nil {
 		return "", err
+	}
+	if r.AfterCall != nil {
+		r.AfterCall(resp.Provider, resp.Model, resp.Usage)
 	}
 	return resp.Message.Content, nil
 }

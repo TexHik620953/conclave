@@ -22,7 +22,10 @@ providers:
 settings:
   # Default model for roles that do not pin one.
   default_model: "ollama/qwen2.5-coder:7b"
-  # Role used by controller nodes that do not name one.
+  # Pipeline used when a run does not name one. "auto" is the controller-driven
+  # supervisor that decides which roles to run; users do not have to author a graph.
+  default_pipeline: auto
+  # Role used by controller/supervisor nodes that do not name one.
   controller: controller
   max_parallel: 4
   max_iterations: 12
@@ -52,7 +55,8 @@ settings:
     "openai/gpt-4o": {input_per_1m: 2.50, output_per_1m: 10.00}
     "openai/gpt-4o-mini": {input_per_1m: 0.15, output_per_1m: 0.60}
     "deepseek/deepseek-chat": {input_per_1m: 0.27, output_per_1m: 1.10}
-  # Context window per model, used to show usage against the limit.  model_limits:
+  # Context window per model, used to show usage against the limit.
+  model_limits:
     "openai/gpt-4o": 128000
     "openai/gpt-4o-mini": 128000
     "ollama/qwen2.5-coder:7b": 32768

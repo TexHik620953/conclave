@@ -7,11 +7,19 @@ reviewer, DBA, frontend, дизайнер и т.д.), каждая может и
 OpenRouter, ...) и локальные (Ollama). Кодинг — частный случай; пайплайны
 настраиваются под любые задачи.
 
----
+> **English.** conclave is a multi-role LLM agent orchestrator written in Go.
+> It runs editable roles (controller, architect, senior, reviewer, DBA, …) over
+> any OpenAI-compatible provider (cloud or local Ollama), driven either by
+> declarative YAML pipelines or by a `supervisor` node where the controller
+> model decides which roles to run next. It ships a browser chat UI with
+> persistent sessions, mid-run messaging, streaming tool calls, MCP server and
+> client support, and a Docker image. MIT licensed.
+> **Full English documentation: [README.en.md](README.en.md).**
 
 ## Содержание
 
 - [Быстрый старт](#быстрый-старт)
+- [Кейсы использования](#кейсы-использования)
 - [Концепции](#концепции)
 - [Архитектура](#архитектура)
 - [Конфигурация](#конфигурация)
@@ -37,7 +45,7 @@ OpenRouter, ...) и локальные (Ollama). Кодинг — частный
 ```bash
 go build -o conclave ./cmd/conclave
 
-# создать конфиг в ./.conclave (провайдеры, 15 ролей, промпты, 8 пайплайнов)
+# создать конфиг в ./.conclave (провайдеры, 15 ролей, промпты, пайплайны)
 ./conclave config init
 
 # проверить
@@ -54,13 +62,197 @@ go build -o conclave ./cmd/conclave
 ./conclave mcp
 ```
 
+**Пайплайн писать не обязательно.** По умолчанию запускается `auto`: узел
+`supervisor`, в котором LLM-менеджер сам решает, какие роли и в каком порядке
+запускать, итерируя до готовности. Пользователь просто формулирует задачу —
+контроллер планирует и делегирует. Готовые декларативные пайплайны
+(`feature`, `research`, `solve`, …) остаются как примеры для повторяемых
+процессов, но их можно не использовать.
+
 Пайплайны запускаются через веб-интерфейс (`serve`). Отдельных CLI-команд
 `run`/`ask` нет — только веб, MCP и отладочные команды (списки ролей/пайплайнов/
 прогонов, `config`, `version`).
 
+### Docker
+
+```bash
+docker build -t conclave .
+docker run --rm -p 8080:8080 \
+  -v "$PWD/.conclave:/data/.conclave" \
+  -v "$PWD/workspace:/workspace" \
+  -e OPENAI_API_KEY conclave serve --addr 0.0.0.0:8080
+```
+
+В образ встроен собранный фронтенд; `--data-dir` по умолчанию `/data/.conclave`.
+При публикации на `0.0.0.0` **обязательно** задайте `--token` (см. раздел Web UI):
+без токена API и WebSocket доступны всем, кто дотянется до порта.
+
 По умолчанию роли смотрят на `openai/gpt-4o` и т.п. Чтобы работало «из коробки»
 без облачных ключей, поставьте Ollama и поменяйте `model` у ролей на
 `ollama/qwen2.5-coder:7b` (или задайте `settings.default_model`).
+
+---
+
+## Кейсы использования
+
+Ниже — типовые сценарии. Везде предполагается, что конфиг уже создан
+(`conclave config init`) и запущен `conclave serve`; дальше действия — в
+браузере (`http://127.0.0.1:8080`) или через MCP.
+
+### 1. Фича с планированием, кодом и мульти-ревью
+
+Пайплайн `feature`: архитектор строит план → контроллер решает, готов ли он →
+гейт спрашивает подтверждение → senior реализует → `security_reviewer`, `qa`,
+`devops` ревьюят параллельно → цикл «ревью/фикс» до `PASS` → tech_writer
+пишет резюме.
+
+- Pipeline: `feature`, Task: «Добавь экспорт прогонов в CSV в `internal/web`».
+- Workspace: путь к репозиторию.
+- Смотрите таймлайн: план, диффы через `apply_patch`/`edit_file`, вызовы
+  `run_tests`, вердикты `STATUS: PASS/FAIL`.
+- Артефакты `plan.md`, `implementation.md`, `review.md`, `summary.md` — в панели
+  **Result** (кнопка `download .md`).
+
+### 2. Быстрый багфикс
+
+Пайплайн `solve`: план → исполнение → параллельная проверка (`qa`,
+`security_reviewer`) → резюме. Удобно, когда не нужны гейты и длинный цикл.
+
+- Pipeline: `solve`, Task: «Падает тест `TestFoo` при пустом входе — найди и
+  исправь, добавь регрессионный тест».
+
+### 3. Динамический режим: контроллер сам выбирает роли
+
+Пайплайн `auto` использует узел `supervisor`: LLM-менеджер сам решает, кого
+позвать (`delegate`), может запускать нескольких параллельно
+(`delegate_parallel`) и завершает шаг через `finish`. Ничего не нужно
+прописывать в графе заранее.
+
+- Pipeline: `auto`, Task: «Разберись, почему растёт latency на эндпоинте
+  `/api/runs`, и предложи фикс».
+- Ограничения: список доступных ролей — `roles` узла, число шагов —
+  `max_steps`, стоимость — `budget_usd`.
+- Когда использовать: задача неизвестной формы, где заранее непонятно, какие
+  специалисты понадобятся. Для повторяемых процессов лучше фиксированный
+  пайплайн.
+
+### 4. Исследование и бриф
+
+Пайплайн `research`: исследователь и критик итерируют, затем пишется бриф.
+Ролям можно дать `web_search` (Exa/SearXNG) и `http_fetch`.
+
+- Pipeline: `research`, Task: «Сравни подходы к хранению сессий в Go и
+  порекомендуй».
+
+### 5. Решение с вопросом пользователю
+
+Пайплайн `decision`: ресёрч → варианты → `controller` с `ask_user` (вопрос
+появляется в браузере) → запись решения. Роль может уточнить у вас выбор
+(`single`/`multi`/свой ответ).
+
+- Pipeline: `decision`, Task: «Выбери БД для сервиса очередей».
+
+### 6. Документ / статья
+
+Пайплайн `write`: план → черновик → ревью → финал.
+
+- Pipeline: `write`, Task: «Напиши onboarding-гайд по проекту на 2 страницы».
+
+### 7. Ops-изменение
+
+Пайплайн `ops`: оценка → план → ревью → резюме. Полезно для миграций, изменений
+CI, инфраструктурных правок.
+
+- Pipeline: `ops`, Task: «Спланируй переезд с GitHub Actions на self-hosted
+  runners».
+
+### 8. Дизайн-концепт
+
+Пайплайн `design`: ресёрч → концепт → критика → спецификация.
+
+- Pipeline: `design`, Task: «Концепт onboarding-экрана для мобильного клиента».
+
+### 9. Чат: уточнение прямо во время работы
+
+Во время активного прогона поле ввода внизу активно. Отправьте сообщение —
+оно ставится в очередь и впрыскивается ролям/контроллеру между итерациями (в
+таймлайне появится карточка «you»). Так можно «догонять» задачу на ходу, не
+останавливая прогон:
+
+- «Не трогай публичный API, только внутренние функции».
+- «Игнорируй предупреждения линтера, сначала закончи функциональность».
+
+Если прогон уже завершён, сообщение стартует новый ход в той же сессии, сохраняя
+историю чата.
+
+### 10. Повтор конкретного шага (revert)
+
+Шаг сломался или хочется другой результат: в карточке узла нажмите
+**revert from here** — узел и все последующие удаляются, затем **resume**
+перезапускает их. Удобно, чтобы повторить один вызов инструмента или шаг, не
+гоняя весь пайплайн заново.
+
+### 11. Локальные модели (Ollama)
+
+```yaml
+# .conclave/config.yaml
+providers:
+  ollama:
+    type: openai
+    base_url: "http://localhost:11434/v1"
+settings:
+  default_model: ollama/qwen2.5-coder:7b
+```
+
+Проверка: `ollama pull qwen2.5-coder:7b && conclave config validate`. Дёшево и
+приватно; для сложных шагов можно оставить облачную модель только у архитектора
+и ревьюеров.
+
+### 12. Разные модели под разные роли
+
+У каждой роли свой `model` и `fallback`:
+
+```yaml
+# roles/architect.yaml — сильная модель для планирования
+model: openrouter/anthropic/claude-3.5-sonnet
+fallback: ["openai/gpt-4o"]
+
+# roles/junior.yaml — дешёвая локальная модель для рутины
+model: ollama/qwen2.5-coder:7b
+```
+
+### 13. MCP из opencode (без браузера)
+
+opencode вызывает conclave как инструмент (см. раздел
+[Интеграция с opencode](#интеграция-с-opencode)):
+
+- «Запусти `conclave_run_pipeline` с pipeline `feature` и задачей …».
+- «Спроси роль `security_reviewer` про этот дифф» (`conclave_ask_role`).
+
+opencode остаётся драйвером, тяжёлая многомодельная работа уходит в conclave.
+
+### 14. Read-only анализ (безопасный режим)
+
+Чтобы роли только анализировали, задайте права на уровне роли/узла:
+
+```yaml
+permissions:
+  fs_read: true
+  fs_write: false
+  shell: false
+  network: false
+tools: [read_file, list_dir, glob, grep]
+```
+
+Такой ревьюер не сможет изменить workspace. Полезно для аудита кода и
+исследований на недоверенных репозиториях.
+
+### 15. Свой пайплайн под процесс
+
+Добавьте `.conclave/pipelines/<name>.yaml` (см.
+[Пайплайны и типы узлов](#пайплайны-и-типы-узлов)) и используйте `edges` с
+`when`, `controller`, `gate.ask` и `supervisor`. Пайплайн сразу
+доступен в веб-интерфейсе и через MCP.
 
 ---
 
@@ -99,7 +291,7 @@ internal/
   role/                       роль + agent-loop, сборка контекста, суммаризация
   tool/                       инструменты, sandbox, права, todo, ask_user
   orchestrator/               движок пайплайна, планировщик, условия, шаблоны, состояние
-  store/                      SQLite (runs/nodes/events/artifacts) + файлы артефактов
+  store/                      SQLite (sessions/messages/runs/nodes/events/artifacts) + файлы артефактов
   event/                      шина событий
   memory/                     обрезка контекста по бюджету
   mcp/                        MCP-сервер (stdio, elicitation) и клиенты (stdio + HTTP/SSE)
@@ -166,9 +358,10 @@ providers:
 | Ключ | Назначение |
 |---|---|
 | `default_model` | модель для ролей без своего `model` |
-| `controller` | роль для controller-узлов без `role` |
+| `default_pipeline` | пайплайн, если прогон не задал свой (по умолчанию `auto` — контроллер решает сам) |
+| `controller` | роль для controller/supervisor-узлов без `role` |
 | `max_parallel` | максимум параллельных узлов |
-| `max_iterations` | лимит итераций agent-loop и loop-узлов |
+| `max_iterations` | лимит итераций agent-loop |
 | `max_tokens` | дефолтный лимит ответа |
 | `max_context_bytes` | обрезка контекстного блока |
 | `timeout` | таймаут одного вызова LLM |
@@ -231,9 +424,33 @@ mcp:
 
 ## Пайплайны и типы узлов
 
+Самый простой пайплайн — один узел `supervisor`, который решает всё сам:
+
+```yaml
+# pipelines/auto.yaml (используется по умолчанию)
+description: "Controller-driven: the manager decides which roles to run, iteratively, until it finishes."
+inputs: [task]
+settings:
+  max_parallel: 4
+nodes:
+  - id: lead
+    type: supervisor
+    role: controller
+    prompt: >-
+      Deliver the task. Delegate to the specialist roles with `delegate` /
+      `delegate_parallel`, review the results and iterate until done, then call
+      `finish` with a summary.
+    max_steps: 12
+    roles: [architect, senior, middle, junior, security_reviewer, qa, dba, frontend, backend, devops, tech_writer, researcher, critic]
+    output: result.md
+```
+
+Если нужен воспроизводимый процесс, опишите граф явно — `agent`, `parallel`,
+`controller`, `gate` и `transform`:
+
 ```yaml
 # pipelines/feature.yaml
-description: "Implement a feature with planning, coding and review."
+description: "Implement a feature with planning, coding and multi-role review."
 inputs: [task]
 settings:
   max_parallel: 4
@@ -243,11 +460,7 @@ nodes:
     role: architect
     prompt: "Analyze the task and produce a plan."
     output: plan.md
-    next: [decide]
-  - id: decide
-    type: controller
-    role: controller
-    choices: [approve, stop]
+    next: [approve]
   - id: approve
     type: gate
     ask: true
@@ -263,24 +476,14 @@ nodes:
     type: parallel
     roles: [security_reviewer, qa, devops]
     output: review.md
-    next: [revise]
-  - id: revise
-    type: loop
-    until: "review.passed"
-    max_iterations: 3
-    body: [review, fix]
     next: [summarize]
-  - id: fix
-    type: agent
-    role: senior
-    output: fixes.md
   - id: summarize
     type: agent
     role: tech_writer
     output: summary.md
   - id: stop
     type: transform
-    template: "Controller stopped before implementation."
+    template: "Plan was not approved."
 ```
 
 ### Типы узлов
@@ -290,7 +493,7 @@ nodes:
 | `agent` | Запускает одну роль (agent-loop с инструментами), пишет выход в `output`. |
 | `parallel` | Запускает несколько ролей **одновременно** (лимит `max_parallel`), агрегирует их выводы в один артефакт и в `outputs[<role>]`. |
 | `controller` | Спрашивает LLM-менеджера, какой из `choices` выбрать; выполняется только выбранная ветка, остальные pruning-ом отсекаются. |
-| `loop` | Повторяет `body` (узлы выполняются напрямую, в порядке списка) до выполнения `until` или `max_iterations`. |
+| `supervisor` | Динамический режим: контроллер-LLM сам решает, какие роли запускать, через инструменты `delegate` / `delegate_parallel`, и завершает шаг вызовом `finish`. Список доступных ролей — `roles`, лимит шагов — `max_steps`. Это режим по умолчанию (`auto`). |
 | `gate` | Вычисляет `condition`; если `ask: true` — ещё и спрашивает пользователя (approve/reject). При `false` идёт в `else` (или останавливается). |
 | `transform` | Рендерит `template` из состояния, без вызова LLM. |
 
@@ -342,7 +545,7 @@ edges:
 
 ## Условия и шаблоны
 
-### Условия (`when`, `condition`, `until`)
+### Условия (`when`, `condition`)
 
 Поддерживается:
 
@@ -391,7 +594,7 @@ artifacts.plan.md contains rollback
 | `http_fetch` | HTTP(S) запрос |
 | `web_search` | веб-поиск (Exa, как в opencode; либо self-hosted SearXNG) |
 | `todo_write`, `todo_read` | todo-лист прогона |
-| `ask_user` | вопрос пользователю (single/multi/custom) |
+| `ask_user` | вопрос пользователю (single/multi/custom); работает в CLI, MCP (elicitation) и Web |
 | `<server>__<tool>` | инструменты внешних MCP-серверов |
 
 `web_search` использует Exa (как opencode) и требует ключ: `EXA_API_KEY` (или
@@ -428,8 +631,16 @@ MCP-инструмента в конфиге нет — меняйте опис�
   пределы запрещён.
 - **Права**: `fs_read`, `fs_write`, `shell`, `network` — на роль, с дефолтами.
 - **Shell**: allowlist команд (`allowed_commands`), denylist (`denied_commands`),
-  таймаут, лимит вывода.
-- **Network**: allowlist хостов (`allowed_hosts`), только http/https.
+  таймаут, лимит вывода. Если allowlist задан, shell-метасимволы (`;`, `&&`,
+  `|`, редиректы, `$()`, backticks) запрещены, а команда выполняется напрямую
+  без `sh -c` — обойти разрешённую команду нельзя. Без allowlist команда идёт
+  через `sh -c` (полный shell по явному разрешению роли).
+- **Git**: опасные опции (`-C`, `--git-dir`, `-c`, `--exec-path`, …) и сетевые/
+  изменяющие глобальное состояние подкоманды (`clone`, `fetch`, `push`, `remote`,
+  `config`, `submodule`, …) запрещены.
+- **Network**: allowlist хостов (`allowed_hosts`); только http/https.
+  `http_fetch` блокирует loopback/private/link-local/metadata IP и повторно
+  проверяет каждый редирект (защита от SSRF), если хост не указан явно.
 - Все результаты обрезаются по `max_output_bytes`.
 
 ---
@@ -461,21 +672,36 @@ MCP-инструмента в конфиге нет — меняйте опис�
 пишется в БД. При превышении `budget_usd` по умолчанию выводится предупреждение и
 прогон продолжается; `on_budget: abort` (или флаг) останавливает прогон.
 
-**Resume.** Каждый узел сохраняется в БД со статусом и выходом. Прогон можно
-продолжить с незавершённого места: `POST /api/runs` с телом
-`{"resume_run_id": "<run-id>"}` восстанавливает выходы, артефакты и todo,
-пропускает завершённые узлы и продолжает с незавершённых.
+**Pause / Resume / Revert.** Каждый узел сохраняется в БД со статусом, промптом
+и выходом. `POST /api/runs/{id}/pause` мягко останавливает прогон (статус
+`paused`), `POST /api/runs/{id}/resume` продолжает с незавершённых узлов
+(восстанавливает выходы, артефакты и todo, пропускает завершённые). `POST
+/api/runs/{id}/revert` с телом `{"node_id": "..."}` удаляет этот узел и все,
+что выполнялись после него, — затем `resume` перезапускает их (повтор шага или
+конкретного вызова инструмента). Эквивалент resume через создание:
+`POST /api/runs {"resume_run_id": "<run-id>"}`.
 
 ---
 
 ## Хранилище
 
 - SQLite (чистый Go, `modernc.org/sqlite`) в `--data-dir` (по умолчанию
-  `./.conclave`): таблицы `runs`, `nodes`, `events`, `artifacts`.
+  `./.conclave`): таблицы `sessions`, `messages`, `runs`, `nodes`, `events`,
+  `artifacts`, `meta`.
+- **Сессии** — это чаты: одна сессия содержит несколько прогонов (`runs.session_id`)
+  и канонический лог сообщений (`messages`), поэтому диалог восстанавливается
+  после перезагрузки. Все события (`role.message`, `tool.call`, `tool.result`,
+  `user.question`, `context.usage`, `user.message`) сохраняются с payload'ом и
+  проигрываются в таймлайне.
+- Схема версионируется (`meta.schema_version`), миграции применяются по порядку.
 - Файлы артефактов: `<data-dir>/runs/<run-id>/<name>`.
+- Прогоны пишут heartbeat; «зависшими» (`interrupted`) помечаются только те, чей
+  владелец перестал слать heartbeat, поэтому параллельный `runs list` не ломает
+  активные прогоны.
 - Статусы прогона: `running`, `completed`, `failed`, `aborted` (отмена),
-  `interrupted` (процесс был прерван). При открытии БД «зависшие» `running`
-  без времени завершения помечаются как `interrupted`.
+  `interrupted` (процесс был прерван). При открытии БД как `interrupted`
+  помечаются только «зависшие» `running` — те, чей владелец не слал heartbeat
+  дольше 90 секунд.
 - Ctrl+C во время `serve` (или отмена прогона в веб-интерфейсе) отменяет прогон
   через контекст и помечает его `aborted`, а не оставляет в `running`.
 
@@ -533,9 +759,18 @@ MCP-инструмента в конфиге нет — меняйте опис�
 отдаёт встроенный фронтенд (Vue3) и API. По умолчанию слушает localhost; при
 `--token` требуется `Authorization: Bearer X` (для WebSocket — `?token=X`).
 
+> **Безопасность.** Токен опционален, но при `--addr`, отличном от loopback,
+> задавайте `--token`: без него REST API и WebSocket открыты любому, кто видит
+> порт. WebSocket принимает только same-origin (плюс localhost для dev-сервера
+> Vite), сравнение токена — constant-time, тела запросов ограничены 4 МиБ.
+
 - **REST API**: `GET /api/config`, `POST /api/runs`, `GET /api/runs`,
   `GET /api/runs/{id}`, `GET /api/runs/{id}/artifacts/{name}`,
-  `POST /api/runs/{id}/cancel`, `POST /api/ask`.
+  `POST /api/runs/{id}/cancel`, `POST /api/runs/{id}/pause`,
+  `POST /api/runs/{id}/resume`, `POST /api/runs/{id}/revert`,
+  `POST /api/runs/{id}/followup`, `POST /api/runs/{id}/answer`, `POST /api/ask`;
+  чаты: `GET/POST /api/sessions`, `GET/DELETE /api/sessions/{id}`,
+  `GET/POST /api/sessions/{id}/messages`.
 - **WebSocket** `/api/ws` — потоковый протокол событий (наш, не OpenAI):
 
   ```jsonc
@@ -549,6 +784,7 @@ MCP-инструмента в конфиге нет — меняйте опис�
   {"type":"tool.result","run_id":"...","role":"researcher","model":"...","message":"web_search","data":{"id":"call_1","name":"web_search","is_error":false,"content":"..."}}
   {"type":"context.usage","run_id":"...","data":{"prompt_tokens":1234,"completion_tokens":567,"total_tokens":1801,"context_limit":128000}}
   {"type":"todos.updated","run_id":"...","data":{"todos":[{"id":"t1","content":"...","status":"pending"}]}}
+  {"type":"user.question","run_id":"...","message":"Which DB?","data":{"id":"q1","question":"Which DB?","options":[{"label":"Postgres"}],"multiple":false,"allow_custom":true}}
   {"type":"run.finished","run_id":"...","message":"completed"}
 
   // client -> server
@@ -557,7 +793,17 @@ MCP-инструмента в конфиге нет — меняйте опис�
   {"type":"ping"}
   ```
 
+  Ответ на вопрос отправляется через `POST /api/runs/{id}/answer`
+  `{"id":"q1","selected":["Postgres"],"custom":""}`.
+
 - **Что видно в браузере**:
+  - **стартовый экран**: большое поле «What should the team work on?» — просто
+    опишите задачу и нажмите Start. Пайплайн выбирать не нужно: по умолчанию
+    запускается `auto`, где контроллер сам решает, какие роли звать. Пайплайн и
+    workspace доступны под «Advanced». Есть чипы-примеры задач;
+  - **чаты/сессии**: в сайдбаре список сессий; клик открывает чат с таймлайном и
+    последним прогоном. Сессия переживает перезагрузку страницы и рестарт
+    сервера;
   - **единый таймлайн** прогона в хронологическом порядке: узлы, сообщения
     ролей (`role · model`), вызовы инструментов (аргументы **и** результат,
     включая MCP-инструменты вида `server__tool`), события, использование
@@ -570,7 +816,25 @@ MCP-инструмента в конфиге нет — меняйте опис�
     без промежуточных шагов;
   - статус-бар: статус, `ctx текущий/лимит` с полосой, `in`/`out` (сколько
     токенов отдали сети и сколько она сгенерировала), стоимость, время;
-  - todo-лист, история прогонов и просмотр ролей.
+  - todo-лист, история прогонов и просмотр ролей;
+  - **управление прогоном**: `pause` (мягкая остановка, статус `paused`),
+    `resume` (продолжить с незавершённых узлов), `cancel` (статус `aborted`);
+  - **revert**: в карточке узла — «revert from here»: удаляет этот узел и все
+    следующие, затем `resume` перезапускает их (удобно, чтобы повторить
+    конкретный вызов инструмента/шаг);
+  - **вопросы от моделей**: если у роли в `tools` есть `ask_user`, она может
+    задать вопрос прямо в браузере — в таймлайне появляется карточка с
+    вариантами (single/multi) и полем своего ответа; прогон ждёт ответа;
+  - **скачивание**: в панели Result кнопка `download .md` сохраняет выбранный
+    артефакт или последнее сообщение;
+  - **сообщение во время работы**: поле ввода активно всегда. Если прогон идёт,
+    сообщение ставится в очередь и впрыскивается ролью/контроллером между
+    итерациями (в таймлайне появляется карточка «you»); если прогон завершён —
+    стартует новый ход в той же сессии;
+  - **follow-up**: доп. инструкция, с которой прогон **продолжается в том же
+    контексте**: прежние выходы и таймлайн сохраняются, инструкция добавляется
+    к задаче (`## Follow-up`), и все узлы перезапускаются с учётом этого. Это
+    не сброс, а новая итерация поверх предыдущей.
 - Текст стримится токенами (`role.delta`), а не появляется целиком в конце.
 - Отмена активного прогона — кнопкой `cancel` (`POST /api/runs/{id}/cancel`),
   статус становится `aborted`.
@@ -613,13 +877,19 @@ opencode подключает conclave как локальный MCP-серве�
 
 ## Примеры
 
-### Не-кодинговые пайплайны (seed)
+### Пайплайны (seed)
 
-- `research` — исследование + критика + бриф.
+По умолчанию используется `auto`; остальные — примеры декларативных процессов.
+
+- `auto` — контроллер-супервизор сам выбирает роли и итерирует до `finish`
+  (**по умолчанию**, `default_pipeline: auto`).
+- `feature` — контроллер-супервизор ведёт фичу: план → код → ревью → фиксы.
+- `research` — контроллер-супервизор: исследование + критика + бриф.
 - `write` — план, черновик, ревью, финал.
 - `ops` — оценка, план, ревью, резюме.
 - `design` — ресёрч, концепт, критика, спецификация.
 - `decision` — ресёрч, варианты, controller (с `ask_user`), запись решения.
+- `solve`, `review` — общие задачи и ревью.
 
 ### Роли (seed)
 
@@ -635,7 +905,7 @@ opencode подключает conclave как локальный MCP-серве�
 промпт в `prompts/<id>.md`. Роль сразу доступна в пайплайнах.
 
 **Новый пайплайн**: добавьте `pipelines/<name>.yaml`. При необходимости
-используйте `edges` с `when`, `controller`, `loop`, `gate.ask`.
+используйте `edges` с `when`, `controller`, `gate.ask` и `supervisor`.
 
 **Новый провайдер**: добавьте запись в `providers` с `base_url` (и при
 необходимости `api_key_env`, `headers`). Ничего в коде менять не нужно.
@@ -657,15 +927,17 @@ go build ./cmd/conclave
 ```
 
 Тесты покрывают: загрузку/merge/env конфига, JSON Schema, контекст-лимиты и цены,
-SSE-агрегацию tool_calls, retry/backoff, sandbox и права инструментов, todo и
-ask_user, парсинг ответов, планировщик (условия, diamond-join, gate/else,
-on_no_user), resume, отмену прогона, суммаризацию контекста, MCP-elicitation,
-apply_patch, хранилище (NULL-колонки, interrupted), интеграционный прогон
-пайплайна с мок-провайдером, REST/WebSocket сервер и web_search.
+SSE-агрегацию tool_calls, retry/backoff, sandbox и права инструментов (shell/
+git/fs/symlink/SSRF), todo и ask_user, парсинг ответов, планировщик (условия,
+diamond-join, gate/else, on_no_user), resume, отмену прогона, суммаризацию
+контекста, MCP-elicitation, apply_patch, хранилище (валидация id, сессии и
+сообщения, heartbeat/interrupted, миграции), интеграционный прогон пайплайна с
+мок-провайдером, динамический `supervisor`, впрыск in-flight сообщений,
+REST/WebSocket сервер и web_search.
 
 ### Ключевые пакеты
 
-- `internal/orchestrator/engine.go` — планировщик, узлы, gate/controller/loop.
+- `internal/orchestrator/engine.go` — планировщик, узлы, gate/controller/supervisor.
 - `internal/orchestrator/condition.go` — вычислитель условий.
 - `internal/role/role.go` — agent-loop и суммаризация.
 - `internal/provider/client.go` — OpenAI-совместимый клиент.

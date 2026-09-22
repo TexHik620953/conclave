@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -66,7 +67,7 @@ func (t *webFetch) Execute(ctx context.Context, args json.RawMessage) (Result, e
 	}
 	client := t.env.HTTP
 	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
+		client = t.env.safeHTTPClient()
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -80,14 +81,74 @@ func (t *webFetch) Execute(ctx context.Context, args json.RawMessage) (Result, e
 	return Result{Content: truncate(t.env, b.String()), IsError: resp.StatusCode >= 400}, nil
 }
 
+// hostAllowed reports whether host matches the configured allowlist. An empty
+// allowlist means "no explicit host restriction" (private IPs are still
+// blocked for http_fetch).
+func (e *Env) hostAllowed(host string) bool {
+	for _, allowed := range e.AllowedHosts {
+		if host == allowed || strings.HasSuffix(host, "."+allowed) {
+			return true
+		}
+	}
+	return false
+}
+
 func (e *Env) checkHost(host string) error {
 	if len(e.AllowedHosts) == 0 {
 		return nil
 	}
-	for _, allowed := range e.AllowedHosts {
-		if host == allowed || strings.HasSuffix(host, "."+allowed) {
-			return nil
-		}
+	if e.hostAllowed(host) {
+		return nil
 	}
 	return fmt.Errorf("host %q is not in the network allowlist", host)
+}
+
+// safeHTTPClient returns a client that blocks requests to private, loopback and
+// link-local addresses (unless the host is explicitly allowlisted) and
+// re-validates every redirect, mitigating SSRF.
+func (e *Env) safeHTTPClient() *http.Client {
+	dialer := &net.Dialer{Timeout: 15 * time.Second}
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, err
+			}
+			if !e.hostAllowed(host) {
+				ips, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
+				if err != nil {
+					return nil, err
+				}
+				for _, ip := range ips {
+					if isBlockedIP(ip) {
+						return nil, fmt.Errorf("refusing to connect to private address %s", ip)
+					}
+				}
+			}
+			return dialer.DialContext(ctx, network, net.JoinHostPort(host, port))
+		},
+	}
+	return &http.Client{
+		Timeout:   30 * time.Second,
+		Transport: transport,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("too many redirects")
+			}
+			if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
+				return fmt.Errorf("redirect to non-http(s) scheme %q", req.URL.Scheme)
+			}
+			if err := e.checkHost(req.URL.Hostname()); err != nil {
+				return err
+			}
+			return nil
+		},
+	}
+}
+
+// isBlockedIP reports whether ip is loopback, private, link-local, multicast or
+// otherwise unsuitable for outbound agent fetches.
+func isBlockedIP(ip net.IP) bool {
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified()
 }

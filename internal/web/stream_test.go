@@ -37,7 +37,12 @@ func (d *engineDeps) ListArtifacts(string) ([]store.Artifact, error) { return ni
 func (d *engineDeps) ListEvents(string, int) ([]store.EventRecord, error) {
 	return nil, nil
 }
+func (d *engineDeps) ListRecentEvents(string, int) ([]store.EventRecord, error) {
+	return nil, nil
+}
 func (d *engineDeps) ArtifactContent(string, string) (string, error) { return "", nil }
+func (d *engineDeps) SetRunStatus(string, string) error              { return nil }
+func (d *engineDeps) RevertFrom(string, string) error                { return nil }
 func (d *engineDeps) Bus() *event.Bus                                { return d.bus }
 func (d *engineDeps) RunPipeline(ctx context.Context, opts orchestrator.RunOptions) (*orchestrator.RunResult, error) {
 	return d.engine.Run(ctx, opts)

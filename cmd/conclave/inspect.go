@@ -99,7 +99,7 @@ func newVersionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print version",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Println("conclave 0.1.0")
+			fmt.Println("conclave " + version)
 			return nil
 		},
 	}

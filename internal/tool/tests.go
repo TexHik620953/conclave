@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -70,7 +71,17 @@ func detectTestCommand(workspace, target string) (string, []string, error) {
 	switch {
 	case has("go.mod"):
 		if target != "" {
-			return "go", []string{"test", target}, nil
+			// Never let the model pass flags (e.g. -exec, -toolexec) or an
+			// absolute path as the test target.
+			if strings.HasPrefix(target, "-") || filepath.IsAbs(target) ||
+				strings.ContainsAny(target, " \t\n\r;&|$`'\"<>") {
+				return "", nil, fmt.Errorf("invalid test target %q", target)
+			}
+			clean := filepath.Clean(target)
+			if strings.HasPrefix(clean, "..") {
+				return "", nil, fmt.Errorf("test target %q escapes workspace", target)
+			}
+			return "go", []string{"test", clean}, nil
 		}
 		return "go", []string{"test", "./..."}, nil
 	case has("Cargo.toml"):

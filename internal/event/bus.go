@@ -21,6 +21,7 @@ const (
 	ContextUsage Type = "context.usage"
 	Summarized   Type = "context.summarized"
 	TodosUpdated Type = "todos.updated"
+	UserQuestion Type = "user.question"
 	Error        Type = "error"
 )
 

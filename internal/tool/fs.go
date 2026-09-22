@@ -6,22 +6,57 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
 )
 
+// resolvePath turns a possibly-relative path into an absolute path inside the
+// workspace. It performs a lexical containment check and then resolves symlinks
+// on the longest existing ancestor so a symlink inside the workspace cannot
+// point outside it.
 func resolvePath(workspace, p string) (string, error) {
 	if p == "" {
 		return "", fmt.Errorf("path is required")
 	}
+	ws := filepath.Clean(workspace)
+	if ws == "" || ws == "." {
+		return "", fmt.Errorf("workspace is not configured")
+	}
 	if !filepath.IsAbs(p) {
-		p = filepath.Join(workspace, p)
+		p = filepath.Join(ws, p)
 	}
 	p = filepath.Clean(p)
-	ws := filepath.Clean(workspace)
-	if ws != "" && p != ws && !strings.HasPrefix(p, ws+string(os.PathSeparator)) {
+	if p != ws && !strings.HasPrefix(p, ws+string(os.PathSeparator)) {
 		return "", fmt.Errorf("path %q escapes workspace %q", p, ws)
+	}
+
+	realWS, err := filepath.EvalSymlinks(ws)
+	if err != nil {
+		realWS = ws
+	}
+	// Resolve the longest existing prefix of p (the leaf may not exist yet).
+	existing := p
+	for {
+		if _, err := os.Lstat(existing); err == nil {
+			break
+		}
+		parent := filepath.Dir(existing)
+		if parent == existing {
+			break
+		}
+		existing = parent
+	}
+	if resolved, err := filepath.EvalSymlinks(existing); err == nil {
+		rest, relErr := filepath.Rel(existing, p)
+		if relErr == nil {
+			real := filepath.Join(resolved, rest)
+			if real != realWS && !strings.HasPrefix(real, realWS+string(os.PathSeparator)) {
+				return "", fmt.Errorf("path %q escapes workspace %q", p, ws)
+			}
+			return real, nil
+		}
 	}
 	return p, nil
 }
@@ -251,9 +286,13 @@ func (t *globTool) Execute(ctx context.Context, args json.RawMessage) (Result, e
 	}
 	root := t.env.Workspace
 	if root == "" {
-		root = "."
+		return Result{Content: "workspace is not configured", IsError: true}, nil
 	}
-	matches, err := filepath.Glob(filepath.Join(root, in.Pattern))
+	pattern := filepath.ToSlash(in.Pattern)
+	if filepath.IsAbs(in.Pattern) || strings.HasPrefix(pattern, "../") || pattern == ".." {
+		return Result{Content: "pattern must be relative to the workspace", IsError: true}, nil
+	}
+	matches, err := globFiles(root, pattern)
 	if err != nil {
 		return Result{Content: err.Error(), IsError: true}, nil
 	}
@@ -267,6 +306,72 @@ func (t *globTool) Execute(ctx context.Context, args json.RawMessage) (Result, e
 		return Result{Content: "no matches"}, nil
 	}
 	return Result{Content: truncate(t.env, b.String())}, nil
+}
+
+// globFiles supports ** recursive globbing (which filepath.Glob does not) by
+// walking the workspace and matching each relative path.
+func globFiles(root, pattern string) ([]string, error) {
+	if !strings.Contains(pattern, "**") {
+		return filepath.Glob(filepath.Join(root, filepath.FromSlash(pattern)))
+	}
+	var out []string
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if d.Name() == ".git" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return nil
+		}
+		if matchGlob(pattern, filepath.ToSlash(rel)) {
+			out = append(out, path)
+		}
+		return nil
+	})
+	return out, err
+}
+
+// matchGlob matches a slash-separated glob where "**" matches any number of
+// path segments.
+func matchGlob(pattern, name string) bool {
+	pp := strings.Split(pattern, "/")
+	np := strings.Split(name, "/")
+	var match func(i, j int) bool
+	match = func(i, j int) bool {
+		for i < len(pp) {
+			if pp[i] == "**" {
+				// Collapse consecutive **.
+				for i < len(pp) && pp[i] == "**" {
+					i++
+				}
+				if i == len(pp) {
+					return true
+				}
+				for k := j; k <= len(np); k++ {
+					if match(i, k) {
+						return true
+					}
+				}
+				return false
+			}
+			if j >= len(np) {
+				return false
+			}
+			if ok, _ := path.Match(pp[i], np[j]); !ok {
+				return false
+			}
+			i++
+			j++
+		}
+		return j == len(np)
+	}
+	return match(0, 0)
 }
 
 type grepTool struct{ env *Env }

@@ -1,0 +1,10 @@
+.git
+.gitignore
+conclave
+test
+web/node_modules
+internal/web/dist
+*.db
+*.db-shm
+*.db-wal
+sess.json

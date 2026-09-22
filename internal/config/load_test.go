@@ -79,6 +79,29 @@ prompt_file: prompts/qa.md
 	}
 }
 
+func TestValidateRejectsNetworkToolWithoutPermission(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "config.yaml", `
+providers:
+  mock:
+    type: openai
+    base_url: "http://localhost:1/v1"
+roles:
+  critic:
+    model: mock/m
+    tools: [read_file, web_search]
+    permissions:
+      network: false
+`)
+	_, err := Load(LoadOptions{GlobalDir: dir, DisableProject: true})
+	if err == nil {
+		t.Fatal("expected validation error for network tool with network=false")
+	}
+	if !strings.Contains(err.Error(), "requires network") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestValidateRejectsLiteralAPIKeyInEnvField(t *testing.T) {
 	dir := t.TempDir()
 	write(t, dir, "config.yaml", `

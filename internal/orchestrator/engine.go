@@ -37,16 +37,57 @@ type Engine struct {
 	MCP      *mcp.Manager
 	Asker    tool.Asker
 	Out      io.Writer
+	// Inbox drains user messages queued while a run is active. Roles inject
+	// them between iterations.
+	Inbox func(runID string) []string
+
+	mu       sync.RWMutex
+	sessions map[string]string // runID -> sessionID
+}
+
+// setSession associates a run with a chat session.
+func (e *Engine) setSession(runID, sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	e.mu.Lock()
+	if e.sessions == nil {
+		e.sessions = map[string]string{}
+	}
+	e.sessions[runID] = sessionID
+	e.mu.Unlock()
+}
+
+func (e *Engine) clearSession(runID string) {
+	e.mu.Lock()
+	delete(e.sessions, runID)
+	e.mu.Unlock()
+}
+
+func (e *Engine) sessionFor(runID string) string {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.sessions[runID]
+}
+
+// inboxFor returns a drain function for the run's queued user messages.
+func (e *Engine) inboxFor(runID string) func() []string {
+	if e.Inbox == nil {
+		return nil
+	}
+	return func() []string { return e.Inbox(runID) }
 }
 
 // RunOptions configures a single pipeline run.
 type RunOptions struct {
 	Pipeline    string
+	SessionID   string
 	Task        string
 	Workspace   string
 	Inputs      map[string]string
 	ResumeRunID string
 	RunID       string
+	Followup    string
 	OnDelta     func(provider.Delta)
 }
 
@@ -94,8 +135,19 @@ func (e *Engine) Run(ctx context.Context, opts RunOptions) (*RunResult, error) {
 		if opts.Workspace == "" {
 			opts.Workspace = run.Workspace
 		}
+		if opts.SessionID == "" {
+			opts.SessionID = run.SessionID
+		}
 	}
 
+	// The controller decides what to do; a pipeline is optional. When none is
+	// given we fall back to the configured default (the NN-driven supervisor).
+	if opts.Pipeline == "" {
+		opts.Pipeline = e.Cfg.Settings.DefaultPipeline
+		if opts.Pipeline == "" {
+			opts.Pipeline = "auto"
+		}
+	}
 	pipe, ok := e.Cfg.Pipelines[opts.Pipeline]
 	if !ok {
 		return nil, fmt.Errorf("unknown pipeline %q", opts.Pipeline)
@@ -125,6 +177,12 @@ func (e *Engine) Run(ctx context.Context, opts RunOptions) (*RunResult, error) {
 		if err := e.restoreState(rc, resumeRun); err != nil {
 			return nil, err
 		}
+		if opts.Followup != "" {
+			rc.state.Task = strings.TrimSpace(rc.state.Task) + "\n\n## Follow-up\n" + opts.Followup
+			// Keep the previous outputs as context but re-run every node so the
+			// whole pipeline reacts to the new instruction.
+			rc.state.ClearCompleted()
+		}
 		done = rc.state.completedNodes()
 		if e.Store != nil {
 			_ = e.Store.MarkRunning(resumeRun.ID)
@@ -142,7 +200,9 @@ func (e *Engine) Run(ctx context.Context, opts RunOptions) (*RunResult, error) {
 		}
 		if e.Store != nil {
 			if err := e.Store.CreateRun(store.Run{
-				ID: rc.state.RunID, Pipeline: opts.Pipeline, Task: opts.Task, Workspace: workspace, StartedAt: time.Now(),
+				ID: rc.state.RunID, SessionID: opts.SessionID, Pipeline: opts.Pipeline,
+				Task: opts.Task, Workspace: workspace,
+				Inputs: rc.state.Inputs, StartedAt: time.Now(),
 			}); err != nil {
 				return nil, err
 			}
@@ -150,6 +210,12 @@ func (e *Engine) Run(ctx context.Context, opts RunOptions) (*RunResult, error) {
 		e.emit(rc.state.RunID, "", "", event.RunStarted, opts.Pipeline, nil)
 	}
 	runID := rc.state.RunID
+	e.setSession(runID, opts.SessionID)
+	defer e.clearSession(runID)
+	ctx = tool.WithRunID(ctx, runID)
+
+	stopHeartbeat := e.startHeartbeat(runID)
+	defer stopHeartbeat()
 
 	runErr := e.drive(ctx, rc, rc.start, done)
 
@@ -185,9 +251,38 @@ func (e *Engine) Run(ctx context.Context, opts RunOptions) (*RunResult, error) {
 	return res, nil
 }
 
+// startHeartbeat periodically refreshes the run's liveness marker so another
+// process opening the store does not mark an active run as interrupted. It
+// returns a stop function.
+func (e *Engine) startHeartbeat(runID string) func() {
+	if e.Store == nil {
+		return func() {}
+	}
+	done := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				_ = e.Store.Heartbeat(runID)
+			}
+		}
+	}()
+	return func() { close(done) }
+}
+
 // restoreState reloads outputs, artifacts and todos from a previous run.
 func (e *Engine) restoreState(rc *runContext, run *store.Run) error {
 	rc.state.Task = run.Task
+	if len(run.Inputs) > 0 {
+		rc.state.Inputs = map[string]string{}
+		for k, v := range run.Inputs {
+			rc.state.Inputs[k] = v
+		}
+	}
 	rc.state.AddUsage(provider.Usage{PromptTokens: run.PromptTokens, CompletionTokens: run.CompletionTokens})
 	rc.state.AddCost(run.CostUSD)
 
@@ -295,8 +390,13 @@ func (e *Engine) drive(ctx context.Context, rc *runContext, start string, done m
 	return nil
 }
 
-// runWave executes a set of ready nodes concurrently.
+// runWave executes a set of ready nodes concurrently. If any node fails, the
+// remaining nodes in the wave are cancelled so they do not keep making LLM
+// calls or writing artifacts after a failure.
 func (e *Engine) runWave(ctx context.Context, rc *runContext, ids []string, max int) (map[string][]string, error) {
+	waveCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	results := make(map[string][]string, len(ids))
 	var mu sync.Mutex
 	var firstErr error
@@ -306,23 +406,29 @@ func (e *Engine) runWave(ctx context.Context, rc *runContext, ids []string, max 
 		wg.Add(1)
 		go func(id string) {
 			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-waveCtx.Done():
+				return
+			}
 			node, ok := rc.nodes[id]
 			if !ok {
 				mu.Lock()
 				if firstErr == nil {
 					firstErr = fmt.Errorf("unknown node %q", id)
+					cancel()
 				}
 				mu.Unlock()
 				return
 			}
-			next, err := e.execNode(ctx, rc, node)
+			next, err := e.execNode(waveCtx, rc, node)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
 				if firstErr == nil {
 					firstErr = err
+					cancel()
 				}
 				return
 			}
@@ -368,8 +474,8 @@ func (e *Engine) execNode(ctx context.Context, rc *runContext, node config.Node)
 		return e.execParallel(ctx, rc, node)
 	case "controller":
 		return e.execController(ctx, rc, node)
-	case "loop":
-		return e.execLoop(ctx, rc, node)
+	case "supervisor":
+		return e.execSupervisor(ctx, rc, node)
 	case "gate":
 		return e.execGate(ctx, rc, node)
 	case "transform":
@@ -547,44 +653,8 @@ func (e *Engine) execController(ctx context.Context, rc *runContext, node config
 	return []string{choice}, nil
 }
 
-func (e *Engine) execLoop(ctx context.Context, rc *runContext, node config.Node) ([]string, error) {
-	if len(node.Body) == 0 {
-		return nil, fmt.Errorf("node %s: loop requires body", node.ID)
-	}
-	maxIter := node.MaxIter
-	if maxIter <= 0 {
-		maxIter = rc.pipe.Settings.MaxIterations
-	}
-	if maxIter <= 0 {
-		maxIter = e.Cfg.Settings.MaxIterations
-	}
-	for i := 1; i <= maxIter; i++ {
-		rc.state.SetIterations(i)
-		e.emit(rc.state.RunID, node.ID, "", event.NodeStarted, "loop", map[string]any{"iteration": i})
-		for _, bodyID := range node.Body {
-			bodyNode, ok := rc.nodes[bodyID]
-			if !ok {
-				return nil, fmt.Errorf("node %s: loop body references unknown node %q", node.ID, bodyID)
-			}
-			if _, err := e.execNode(ctx, rc, bodyNode); err != nil {
-				return nil, err
-			}
-		}
-		done, err := Eval(node.Until, rc.state, i)
-		if err != nil {
-			return nil, fmt.Errorf("node %s: until: %w", node.ID, err)
-		}
-		if done {
-			e.emit(rc.state.RunID, node.ID, "", event.NodeFinished, fmt.Sprintf("loop exited after %d iteration(s)", i), nil)
-			return e.resolveNext(rc, node.ID)
-		}
-	}
-	e.emit(rc.state.RunID, node.ID, "", event.NodeFinished, fmt.Sprintf("loop reached max iterations (%d)", maxIter), nil)
-	return e.resolveNext(rc, node.ID)
-}
-
 func (e *Engine) execGate(ctx context.Context, rc *runContext, node config.Node) ([]string, error) {
-	ok, err := Eval(node.Condition, rc.state, rc.state.Iterations)
+	ok, err := Eval(node.Condition, rc.state, rc.state.CurrentIterations())
 	if err != nil {
 		return nil, fmt.Errorf("node %s: condition: %w", node.ID, err)
 	}
@@ -720,6 +790,8 @@ func (e *Engine) buildRuntime(rc *runContext, roleID string, node *config.Node) 
 		Model:              model,
 		Fallback:           fallback,
 		ContextLimit:       e.Cfg.ContextLimit(model),
+		Emit:               e.emitEvent,
+		Inbox:              e.inboxFor(rc.state.RunID),
 		OnDelta:            rc.onDelta,
 		SummarizeThreshold: sumThreshold,
 		SummarizerModel:    e.Cfg.Settings.SummarizerModel,
@@ -823,12 +895,51 @@ func (e *Engine) saveNode(rc *runContext, nodeID, roleID, status, prompt, output
 }
 
 func (e *Engine) emit(runID, nodeID, roleID string, typ event.Type, message string, data map[string]any) {
+	e.emitEvent(event.Event{Type: typ, RunID: runID, NodeID: nodeID, Role: roleID, Message: message, Data: data})
+}
+
+// EmitEvent lets external components (e.g. the question broker) publish an
+// event through the same persistence path as the engine.
+func (e *Engine) EmitEvent(ev event.Event) { e.emitEvent(ev) }
+
+// emitEvent publishes an event to the bus and persists it so the run timeline
+// survives a reload.
+func (e *Engine) emitEvent(ev event.Event) {
 	if e.Bus != nil {
-		e.Bus.Publish(event.Event{Type: typ, RunID: runID, NodeID: nodeID, Role: roleID, Message: message, Data: data})
+		e.Bus.Publish(ev)
 	}
 	if e.Store != nil {
-		_ = e.Store.AppendEvent(runID, string(typ), nodeID, roleID, message)
+		_ = e.Store.AppendEvent(ev.RunID, string(ev.Type), ev.NodeID, ev.Role, ev.Message, ev.Data)
+		e.recordMessage(ev)
 	}
+}
+
+// recordMessage appends conversational events to the run's session log so the
+// chat can be replayed after a reload.
+func (e *Engine) recordMessage(ev event.Event) {
+	sid := e.sessionFor(ev.RunID)
+	if sid == "" {
+		return
+	}
+	kind, content, data := "", "", ev.Data
+	switch ev.Type {
+	case event.RoleMessage:
+		kind, content = "text", ev.Message
+	case event.ToolCall:
+		kind = "tool_call"
+	case event.ToolResult:
+		kind = "tool_result"
+	case event.UserQuestion:
+		kind = "question"
+	case event.Error:
+		kind, content = "error", ev.Message
+	default:
+		return
+	}
+	_, _ = e.Store.AppendMessage(store.Message{
+		SessionID: sid, RunID: ev.RunID, Role: ev.Role, Model: ev.Model,
+		Kind: kind, Content: content, Data: data,
+	})
 }
 
 func newRunContext(pipe config.Pipeline, workspace string, opts RunOptions) (*runContext, error) {
@@ -894,7 +1005,7 @@ func (e *Engine) resolveNext(rc *runContext, nodeID string) ([]string, error) {
 			out = appendUnique(out, ed.To)
 			continue
 		}
-		ok, err := Eval(ed.When, rc.state, rc.state.Iterations)
+		ok, err := Eval(ed.When, rc.state, rc.state.CurrentIterations())
 		if err != nil {
 			return nil, fmt.Errorf("edge %s -> %s: %w", nodeID, ed.To, err)
 		}

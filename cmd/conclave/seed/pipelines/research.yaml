@@ -1,30 +1,17 @@
-description: "Research with a research/critique loop, then write a brief."
+description: "Controller-driven research: the lead decides when research is sufficient, then writes a brief."
 inputs: [task]
 settings:
   max_parallel: 3
-  outputs: [research.md, critique.md, brief.md]
+  outputs: [brief.md]
 nodes:
-  - id: iterate
-    type: loop
-    until: 'critique contains "STATUS: DONE"'
-    max_iterations: 3
-    body: [research, critique]
-    next: [brief]
-
-  - id: research
-    type: agent
-    role: researcher
-    prompt: "Answer the task. For questions about the outside world use web_search and http_fetch; only consult the local repository when the task is about this codebase. Address any critique from the previous iteration."
-    output: research.md
-
-  - id: critique
-    type: agent
-    role: critic
-    prompt: "Review the research: gaps, weak assumptions, unverified or missing sources. If more research is needed, say exactly what to investigate next. End with STATUS: DONE if the research is sufficient, or STATUS: MORE if it needs another pass."
-    output: critique.md
-
-  - id: brief
-    type: agent
-    role: tech_writer
-    prompt: "Write a concise brief that answers the task, incorporating the research and the critique."
+  - id: lead
+    type: supervisor
+    role: controller
+    prompt: >-
+      Research the task. Delegate investigation to the researcher, then have the
+      critic review the findings (use delegate_parallel to run them together when
+      useful). Iterate until the research is solid and well sourced, then have
+      the tech_writer produce a concise brief and call finish.
+    max_steps: 8
+    roles: [researcher, critic, tech_writer]
     output: brief.md

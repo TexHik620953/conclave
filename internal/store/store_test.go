@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"path/filepath"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -47,6 +48,40 @@ func TestListRunsHandlesNullColumns(t *testing.T) {
 	}
 	if _, err := st.GetRun("legacy"); err != nil {
 		t.Fatalf("GetRun: %v", err)
+	}
+}
+
+func TestRevertFrom(t *testing.T) {
+	dir := t.TempDir()
+	st, err := Open("", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	base := time.Now().UTC()
+	nodes := []NodeRecord{
+		{RunID: "r", NodeID: "a", Status: "completed", StartedAt: base},
+		{RunID: "r", NodeID: "b", Status: "completed", StartedAt: base.Add(time.Second)},
+		{RunID: "r", NodeID: "c", Status: "completed", StartedAt: base.Add(2 * time.Second)},
+	}
+	for _, n := range nodes {
+		if err := st.SaveNode(n); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.RevertFrom("r", "b"); err != nil {
+		t.Fatal(err)
+	}
+	left, err := st.ListNodes("r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(left) != 1 || left[0].NodeID != "a" {
+		t.Fatalf("after revert left = %+v, want [a]", left)
+	}
+	if err := st.RevertFrom("r", "missing"); err == nil {
+		t.Fatal("expected error for unknown node")
 	}
 }
 

@@ -20,18 +20,30 @@ type clientMessage struct {
 	RunID string `json:"run_id,omitempty"`
 }
 
+// defaultOriginPatterns permit the Vite dev server (localhost) in addition to
+// the same-host origin that coder/websocket checks by default.
+var defaultOriginPatterns = []string{
+	"localhost", "localhost:*", "127.0.0.1", "127.0.0.1:*", "[::1]", "[::1]:*",
+}
+
 // Hub fans run events out to connected WebSocket clients.
 type Hub struct {
-	bus *event.Bus
+	bus     *event.Bus
+	origins []string
 }
 
 // NewHub creates a hub over the event bus.
-func NewHub(bus *event.Bus) *Hub { return &Hub{bus: bus} }
+func NewHub(bus *event.Bus, origins []string) *Hub {
+	if origins == nil {
+		origins = defaultOriginPatterns
+	}
+	return &Hub{bus: bus, origins: origins}
+}
 
 // Serve upgrades an HTTP request to a WebSocket and streams events.
 func (h *Hub) Serve(w http.ResponseWriter, r *http.Request) {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		OriginPatterns: []string{"*"},
+		OriginPatterns: h.origins,
 	})
 	if err != nil {
 		return
