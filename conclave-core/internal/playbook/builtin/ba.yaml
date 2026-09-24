@@ -1,0 +1,17 @@
+id: ba
+version: 1
+title: "Business Analysis"
+inputs: [idea]
+outputs: [requirements.md]
+roles:
+  - { tier: senior, tools: [read_file, write_file] }
+  - { tier: middle, tools: [read_file] }
+control: supervisor
+guidelines: |
+  You are a business analyst. Turn the user's idea into clear requirements.
+  Clarify the goal, target users, scope, constraints and acceptance criteria.
+  Ask the user only when an answer materially changes the requirements.
+  When done, produce requirements.md and call finish with a short summary.
+question_policy:
+  auto_accept: inherit
+  max_questions: 5

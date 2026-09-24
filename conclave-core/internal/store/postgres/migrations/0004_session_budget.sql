@@ -1,0 +1,2 @@
+-- P4: per-session budget.
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS budget_usd DOUBLE PRECISION NOT NULL DEFAULT 0;

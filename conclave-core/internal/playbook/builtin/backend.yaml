@@ -1,0 +1,19 @@
+id: backend
+version: 1
+title: "Backend Development"
+inputs: [spec, architecture]
+outputs: [implementation.md]
+roles:
+  - { tier: senior, tools: [read_file, write_file, edit_file, run_tests, git] }
+  - { tier: middle, tools: [read_file, write_file, edit_file, run_tests] }
+  - { tier: junior, tools: [read_file, write_file] }
+control: supervisor
+guidelines: |
+  You are the backend lead. Implement the service described by the spec:
+  design the modules, write the code and tests, and verify with the available
+  build/test tools. Escalate hard parts to the senior tier. Keep the public API
+  consistent with the architecture. Finish with implementation.md summarizing
+  the changes, how to run it and any risks.
+question_policy:
+  auto_accept: inherit
+  max_questions: 3

@@ -1,0 +1,69 @@
+# Brings up the whole platform: `docker compose up -d`.
+#   postgres + redis + conclave-core (HTTP/WS on http://127.0.0.1:8090)
+#
+# Configure the LLM via the host environment, e.g.:
+#   CORE_LLM_BASE_URL=https://api.openai.com/v1 \
+#   CORE_LLM_API_KEY=sk-... CORE_LLM_MODEL=gpt-4o-mini \
+#   docker compose up -d
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: conclave
+      POSTGRES_PASSWORD: conclave
+      POSTGRES_DB: conclave
+    ports:
+      - "5432:5432"
+    volumes:
+      - conclave-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U conclave"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "no"]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  core:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: ${CORE_VERSION:-dev}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      CORE_LISTEN_ADDR: "0.0.0.0:8090"
+      CORE_DB_DSN: "postgres://conclave:conclave@postgres:5432/conclave?sslmode=disable"
+      CORE_REDIS_ADDR: "redis://redis:6379"
+      CORE_FANOUT: "redis"
+      CORE_SECRET_KEY: "${CORE_SECRET_KEY:-dev-secret}"
+      CORE_LLM_BASE_URL: "${CORE_LLM_BASE_URL:-}"
+      CORE_LLM_API_KEY: "${CORE_LLM_API_KEY:-}"
+      CORE_LLM_MODEL: "${CORE_LLM_MODEL:-gpt-4o-mini}"
+      CORE_PROVIDERS: "${CORE_PROVIDERS:-}"
+      CORE_DEFAULT_PROVIDER: "${CORE_DEFAULT_PROVIDER:-default}"
+      CORE_CONFIG_POLL: "${CORE_CONFIG_POLL:-15s}"
+      CORE_LOG_LEVEL: "${CORE_LOG_LEVEL:-info}"
+      CORE_WORKERS: "${CORE_WORKERS:-2}"
+    ports:
+      - "8090:8090"
+    # Lets the container reach a host-run Ollama at host.docker.internal:11434.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+volumes:
+  conclave-pg:

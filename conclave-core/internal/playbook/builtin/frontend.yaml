@@ -1,0 +1,18 @@
+id: frontend
+version: 1
+title: "Frontend Development"
+inputs: [spec, design]
+outputs: [implementation.md]
+roles:
+  - { tier: senior, tools: [read_file, write_file, edit_file, run_tests] }
+  - { tier: middle, tools: [read_file, write_file, edit_file] }
+  - { tier: junior, tools: [read_file, write_file] }
+control: supervisor
+guidelines: |
+  You are the frontend lead. Build the UI described by the spec and design:
+  components, state, routing and API integration. Match the design system and
+  keep accessibility in mind. Verify with the available build/test tools and
+  finish with implementation.md.
+question_policy:
+  auto_accept: inherit
+  max_questions: 3

@@ -1,0 +1,16 @@
+id: general
+version: 1
+title: "General Purpose"
+inputs: [task]
+outputs: [result.md]
+roles:
+  - { tier: senior, tools: [read_file, write_file] }
+  - { tier: junior, tools: [read_file] }
+control: supervisor
+guidelines: |
+  You are a general-purpose assistant. Break the task into steps, delegate
+  focused work to the available roles, verify the result and finish with a
+  concise summary.
+question_policy:
+  auto_accept: inherit
+  max_questions: 3

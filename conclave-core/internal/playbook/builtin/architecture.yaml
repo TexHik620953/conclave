@@ -1,0 +1,17 @@
+id: architecture
+version: 1
+title: "IT Architecture"
+inputs: [spec]
+outputs: [architecture.md]
+roles:
+  - { tier: senior }
+  - { tier: middle }
+control: supervisor
+guidelines: |
+  You are a software architect. From the spec, define the system context,
+  components, data flows, interfaces, technology choices and trade-offs. Call
+  out non-functional requirements (scalability, reliability, security, cost).
+  Finish with architecture.md and a short summary.
+question_policy:
+  auto_accept: inherit
+  max_questions: 3

@@ -1,0 +1,4 @@
+/core
+*.test
+*.out
+.env

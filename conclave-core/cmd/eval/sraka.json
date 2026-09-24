@@ -1,0 +1,42 @@
+{
+  "results": [
+    {
+      "case": "ba-online-shop",
+      "passed": true,
+      "duration": 0,
+      "events": 10,
+      "artifacts": 1
+    },
+    {
+      "case": "general-task",
+      "passed": true,
+      "duration": 0,
+      "events": 10,
+      "artifacts": 1
+    },
+    {
+      "case": "plan-gate-waits",
+      "passed": true,
+      "duration": 0,
+      "events": 12,
+      "artifacts": 2
+    },
+    {
+      "case": "plan-gate-auto-accept",
+      "passed": true,
+      "duration": 0,
+      "events": 9,
+      "artifacts": 1
+    },
+    {
+      "case": "critic-reopens-and-escalates",
+      "passed": true,
+      "duration": 0,
+      "events": 15,
+      "artifacts": 1
+    }
+  ],
+  "passed": 5,
+  "failed": 0,
+  "duration": 4650577397
+}

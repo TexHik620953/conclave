@@ -1,0 +1,17 @@
+id: dba
+version: 1
+title: "Database Engineering"
+inputs: [spec, architecture]
+outputs: [schema.md]
+roles:
+  - { tier: senior, tools: [read_file, write_file, edit_file] }
+  - { tier: middle, tools: [read_file, write_file] }
+control: supervisor
+guidelines: |
+  You are a database engineer. Design the schema, indexes, constraints and
+  migrations needed by the spec. Consider query patterns, normalization,
+  integrity and safe online migrations. Produce schema.md with the DDL and
+  migration plan, then finish.
+question_policy:
+  auto_accept: inherit
+  max_questions: 3

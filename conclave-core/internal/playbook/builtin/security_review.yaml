@@ -1,0 +1,18 @@
+id: security_review
+version: 1
+title: "Security Review"
+inputs: [spec, implementation]
+outputs: [security-review.md]
+roles:
+  - { tier: senior, tools: [read_file, grep, glob] }
+  - { tier: middle, tools: [read_file, grep] }
+control: supervisor
+guidelines: |
+  You are a security reviewer. Inspect the implementation for injection, auth
+  flaws, secret leakage, unsafe deserialization, path traversal, SSRF and
+  dependency risks. For each finding give severity, evidence (file/line) and a
+  concrete fix. Do not modify code. Finish with security-review.md containing a
+  clear verdict (PASS or FAIL) and the findings.
+question_policy:
+  auto_accept: inherit
+  max_questions: 2

@@ -1,0 +1,17 @@
+id: design
+version: 1
+title: "Web Design"
+inputs: [spec]
+outputs: [design.md]
+roles:
+  - { tier: senior }
+  - { tier: middle }
+control: supervisor
+guidelines: |
+  You are a product designer. From the spec, produce a design concept: user
+  flows, information architecture, key screens, layout, typography, color and
+  component states. Note accessibility and responsive behaviour. Finish with
+  design.md and call finish.
+question_policy:
+  auto_accept: inherit
+  max_questions: 4

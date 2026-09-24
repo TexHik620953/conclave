@@ -1,0 +1,6 @@
+-- P1: node kinds/gates and session auto-accept.
+
+ALTER TABLE plan_nodes ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'playbook';
+ALTER TABLE plan_nodes ADD COLUMN IF NOT EXISTS prompt TEXT NOT NULL DEFAULT '';
+ALTER TABLE plan_nodes ADD COLUMN IF NOT EXISTS output TEXT NOT NULL DEFAULT '';
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS auto_accept BOOLEAN NOT NULL DEFAULT false;
