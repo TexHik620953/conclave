@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { api } from '../api'
 import hljs from 'highlight.js'
 import DOMPurify from 'dompurify'
@@ -44,7 +44,16 @@ function tasksFor(status) {
   }
   return filteredTasks.value.filter(t => t.status === status)
 }
-onMounted(() => { refreshBoard() })
+onMounted(focusRequestedTask)
+watch(() => store.openTaskId, focusRequestedTask)
+async function focusRequestedTask() {
+  const id = store.openTaskId
+  if (!id) return
+  await refreshBoard()
+  const task = (store.board.tasks || []).find(t => t.id === id)
+  store.openTaskId = ''
+  if (task) await openDetail(task)
+}
 function openNew(status = 'backlog') {
   editing.value = null
   Object.assign(form, { title: '', description: '', context: '', complexity: 3, priority: 3, component: '', labels: '', epic: '', acceptance: '', depends_on: '', write_scope: '', status, requirements: '', constraints: '', verification: '', out_of_scope: '', complexity_reason: '', kind: 'work', parent_id: '' })

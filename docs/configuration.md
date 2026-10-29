@@ -193,8 +193,36 @@ mcp:
       Authorization: Bearer ${MCP_TOKEN}
 ```
 
-MCP tools are registered into Build and board worker tool registries when the
+MCP tools are registered into Build, Conclave workers and board workers when the
 server is available.
+
+### Example presets
+
+```yaml
+mcp:
+  playwright:
+    type: stdio
+    command: ["npx", "-y", "@playwright/mcp@latest"]
+
+  github:
+    type: stdio
+    command: ["npx", "-y", "@modelcontextprotocol/server-github"]
+    environment:
+      GITHUB_PERSONAL_ACCESS_TOKEN: ${GITHUB_TOKEN}
+
+  sqlite:
+    type: stdio
+    command: ["uvx", "mcp-server-sqlite", "--db-path", "/path/to/db.sqlite"]
+
+  remote:
+    type: http
+    url: https://example.com/mcp
+    headers:
+      Authorization: Bearer ${MCP_TOKEN}
+```
+
+Install the corresponding Node/Python package first. The Web UI shows the tool
+names exposed by each server (`mcp__<server>__<tool>`).
 
 ## Prompt overrides
 
@@ -213,6 +241,48 @@ prompts:
 Supported keys include `worker`, `worker.<worker-id>` and mode-specific prompt
 keys used by `internal/prompt`.
 
+## Web search
+
+Native `web_search` supports four providers:
+
+```yaml
+search:
+  provider: tavily          # tavily | brave | searxng | exa
+  api_key: ${TAVILY_API_KEY}
+  base_url: ""              # required for searxng
+  max_results: 5
+```
+
+Provider keys:
+
+| Provider | Key | Base URL |
+|---|---|---|
+| `tavily` | `TAVILY_API_KEY` | fixed |
+| `brave` | `BRAVE_API_KEY` | fixed |
+| `exa` | `EXA_API_KEY` | fixed |
+| `searxng` | none | required |
+
+The tool accepts `query`, `max_results`, `recency`, `include_domains` and
+`exclude_domains`. Configure it in **Web UI → Config → MCP & search**.
+
+## Web fetch
+
+`web_fetch` supports HTML → Markdown conversion, JSON pretty-printing and plain
+text. Private/loopback network access is blocked by default.
+
+Allow private addresses only for trusted local setups:
+
+```yaml
+permissions:
+  allow_private_network: true
+```
+
+## MCP management
+
+MCP servers can be added in **Web UI → Config → MCP & search**. Environment
+variables in `command`, `environment`, `headers` and `url` are expanded from the
+process environment.
+
 ## Environment variables
 
 | Variable | Purpose |
@@ -222,6 +292,9 @@ keys used by `internal/prompt`.
 | `CONCLAVE_DB` | Override the global SQLite path used by CLI helpers |
 | `CONCLAVE_LLM_FIRST_TOKEN_TIMEOUT` | Time to first token, default `180s` |
 | `CONCLAVE_LLM_IDLE_TIMEOUT` | Max stream idle time, default `180s` |
+| `TAVILY_API_KEY` | Tavily web search key |
+| `BRAVE_API_KEY` | Brave Search key |
+| `EXA_API_KEY` | Exa search key |
 | `XDG_CONFIG_HOME` | Override the global config directory |
 
 Workspace databases are normally stored under:

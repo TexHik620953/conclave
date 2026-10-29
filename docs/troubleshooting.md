@@ -42,6 +42,33 @@ export CONCLAVE_LLM_IDLE_TIMEOUT=300s
 Timeout failures are retried once. The worker checkpoint remains on disk, so a
 retry can continue from the existing worktree and conversation.
 
+## `web_search` returns key/configuration errors
+
+Configure a search provider in **Config → MCP & search** or in YAML:
+
+```yaml
+search:
+  provider: tavily
+  api_key: ${TAVILY_API_KEY}
+```
+
+Supported providers: `tavily`, `brave`, `searxng`, `exa`. SearXNG requires
+`base_url` instead of an API key.
+
+If `web_fetch` refuses a local/private URL, that is intentional SSRF
+protection. Enable `permissions.allow_private_network: true` only for trusted
+local environments.
+
+## MCP server does not appear
+
+- Check the server is enabled.
+- For `stdio`, verify the command exists and starts manually.
+- For `http`, verify the URL and headers.
+- Use **Config → MCP & search** to re-save; open workspaces reload MCP after
+  configuration changes.
+- `${ENV_VAR}` placeholders in command, environment, headers and URL are
+  expanded before launch.
+
 ## `workspace is not a git repository`
 
 Older Conclave versions required the workspace root itself to be a repository.

@@ -337,6 +337,7 @@ func (s *Service) Send(ctx context.Context, text string) error {
 		return err
 	}
 	reg := tools.ReadOnly()
+	tools.AddWebSearch(reg, s.cfg.Search)
 	reg.Add(submitPlanTool{svc: s})
 	if s.tasks != nil {
 		reg.Add(createTaskTool{tr: s.tasks})
@@ -1156,6 +1157,7 @@ func (s *Service) runTask(ctx context.Context, repo gitx.Repo, task domain.Task,
 	if len(w.Tools) > 0 {
 		reg = reg.Only(w.Tools...)
 	}
+	tools.AddWebTools(reg, s.cfg.Search)
 	if s.mcp != nil {
 		s.mcp.AddTo(reg)
 	}
@@ -1301,6 +1303,7 @@ func (s *Service) reviewWithMaster(ctx context.Context) error {
 		return err
 	}
 	reg := tools.ReadOnly()
+	tools.AddWebSearch(reg, s.cfg.Search)
 	reg.Add(submitPlanTool{svc: s})
 	reg.Add(finishRunTool{svc: s})
 	if s.tasks != nil {

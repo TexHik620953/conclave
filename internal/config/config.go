@@ -18,6 +18,7 @@ type Config struct {
 	MCP            map[string]MCPServer `yaml:"mcp,omitempty"`
 	Prompts        map[string]string    `yaml:"prompts,omitempty"`
 	Permissions    Permissions          `yaml:"permissions,omitempty"`
+	Search         SearchConfig         `yaml:"search,omitempty"`
 
 	Path    string `yaml:"-"`
 	Project string `yaml:"-"`
@@ -85,11 +86,19 @@ type MCPServer struct {
 }
 
 type Permissions struct {
-	Shell      string `yaml:"shell,omitempty"` // allow | ask | deny
-	Write      string `yaml:"write,omitempty"`
-	OutsideCwd string `yaml:"outside_cwd,omitempty"`
-	Network    string `yaml:"network,omitempty"`
-	Yolo       bool   `yaml:"yolo,omitempty"`
+	Shell               string `yaml:"shell,omitempty"` // allow | ask | deny
+	Write               string `yaml:"write,omitempty"`
+	OutsideCwd          string `yaml:"outside_cwd,omitempty"`
+	Network             string `yaml:"network,omitempty"`
+	AllowPrivateNetwork bool   `yaml:"allow_private_network,omitempty"`
+	Yolo                bool   `yaml:"yolo,omitempty"`
+}
+
+type SearchConfig struct {
+	Provider   string `yaml:"provider,omitempty" json:"provider"`
+	APIKey     string `yaml:"api_key,omitempty" json:"api_key,omitempty"`
+	BaseURL    string `yaml:"base_url,omitempty" json:"base_url,omitempty"`
+	MaxResults int    `yaml:"max_results,omitempty" json:"max_results,omitempty"`
 }
 
 type ModelRef struct {
@@ -111,6 +120,7 @@ func Default() Config {
 			OutsideCwd: "deny",
 			Network:    "allow",
 		},
+		Search: SearchConfig{Provider: "tavily", MaxResults: 5},
 	}
 }
 
@@ -241,13 +251,41 @@ func merge(dst *Config, src Config) {
 	if src.Permissions.OutsideCwd != "" {
 		dst.Permissions.OutsideCwd = src.Permissions.OutsideCwd
 	}
+	dst.Permissions.AllowPrivateNetwork = dst.Permissions.AllowPrivateNetwork || src.Permissions.AllowPrivateNetwork
 	if src.Permissions.Network != "" {
 		dst.Permissions.Network = src.Permissions.Network
 	}
 	dst.Permissions.Yolo = dst.Permissions.Yolo || src.Permissions.Yolo
+	if src.Search.Provider != "" {
+		dst.Search.Provider = src.Search.Provider
+	}
+	if src.Search.APIKey != "" {
+		dst.Search.APIKey = src.Search.APIKey
+	}
+	if src.Search.BaseURL != "" {
+		dst.Search.BaseURL = src.Search.BaseURL
+	}
+	if src.Search.MaxResults > 0 {
+		dst.Search.MaxResults = src.Search.MaxResults
+	}
 }
 
 func (c *Config) expandEnv() {
+	c.Search.APIKey = os.ExpandEnv(c.Search.APIKey)
+	c.Search.BaseURL = os.ExpandEnv(c.Search.BaseURL)
+	for name, srv := range c.MCP {
+		srv.URL = os.ExpandEnv(srv.URL)
+		for i := range srv.Command {
+			srv.Command[i] = os.ExpandEnv(srv.Command[i])
+		}
+		for k, v := range srv.Headers {
+			srv.Headers[k] = os.ExpandEnv(v)
+		}
+		for k, v := range srv.Env {
+			srv.Env[k] = os.ExpandEnv(v)
+		}
+		c.MCP[name] = srv
+	}
 	for name, p := range c.Providers {
 		p.APIKey = os.ExpandEnv(p.APIKey)
 		p.BaseURL = os.ExpandEnv(p.BaseURL)
@@ -261,6 +299,12 @@ func (c *Config) expandEnv() {
 func (c *Config) Validate() error {
 	if len(c.Providers) == 0 {
 		return errors.New("config: no providers configured")
+	}
+	if c.Search.Provider == "" {
+		c.Search.Provider = "tavily"
+	}
+	if c.Search.MaxResults <= 0 {
+		c.Search.MaxResults = 5
 	}
 	if c.DefaultProfile == "" {
 		c.DefaultProfile = "default"
@@ -482,6 +526,19 @@ permissions:
   write: allow
   outside_cwd: deny
   network: allow
+  allow_private_network: false
+
+# Native web search. Supported: tavily, brave, searxng, exa.
+# search:
+#   provider: tavily
+#   api_key: ${TAVILY_API_KEY}
+#   max_results: 5
+
+# MCP servers (also editable in the web UI).
+# mcp:
+#   playwright:
+#     type: stdio
+#     command: ["npx", "-y", "@playwright/mcp@latest"]
 
 prompts: {}
 `

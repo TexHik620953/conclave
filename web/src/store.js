@@ -12,6 +12,8 @@ export const store = reactive({
   board: { tasks: [], project: null, queue: { running: false, active: 0 } },
   conclave: null,
   view: 'chat',
+  configTab: 'providers',
+  openTaskId: '',
   chat: [],
   ledger: { by_model: {}, by_agent: {} },
   busy: false,

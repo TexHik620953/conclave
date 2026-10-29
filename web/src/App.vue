@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import ChatView from './components/ChatView.vue'
 import BoardView from './components/BoardView.vue'
 import UsageView from './components/UsageView.vue'
+import AgentsView from './components/AgentsView.vue'
 import ConfigView from './components/ConfigView.vue'
 import QuestionsView from './components/QuestionsView.vue'
 import { api, connectGlobalEvents } from './api'
@@ -54,7 +55,7 @@ onMounted(async () => {
       const sid = params.get('session')
       if (sid && sid !== store.state?.session?.id) await openSession(sid)
       const view = params.get('view')
-      if (['chat', 'board', 'questions', 'usage', 'config'].includes(view)) store.view = view
+      if (['chat', 'board', 'questions', 'usage', 'agents', 'config'].includes(view)) store.view = view
       const mode = params.get('mode')
       if (mode && store.state?.session?.mode !== mode) await switchMode(mode)
       syncRoute()
@@ -310,6 +311,7 @@ async function openBoard() { store.view = 'board'; await refreshBoard() }
         <button :class="{ active: store.view === 'board' }" @click="openBoard"><span>▦</span> Board <em class="nav-count">{{ store.counters.board }}</em><em v-if="store.board.queue?.running" class="live"></em></button>
         <button :class="{ active: store.view === 'questions' }" @click="store.view='questions'"><span>?</span> Questions <em class="nav-count">{{ store.counters.questions }}</em></button>
         <button :class="{ active: store.view === 'usage' }" @click="store.view='usage'"><span>◔</span> Usage</button>
+        <button :class="{ active: store.view === 'agents' }" @click="store.view='agents'"><span>◎</span> Agents <em class="nav-count">{{ store.counters.agents || 0 }}</em></button>
         <button :class="{ active: store.view === 'config' }" @click="store.view='config'"><span>⚙</span> Config</button>
       </nav>
 
@@ -355,7 +357,7 @@ async function openBoard() { store.view = 'board'; await refreshBoard() }
             </span>
           </div>
           <div class="title-line">
-            <h1>{{ store.view === 'chat' ? 'Chat' : store.view === 'board' ? 'Board' : store.view === 'questions' ? 'Questions' : store.view === 'usage' ? 'Usage' : 'Config' }}</h1>
+            <h1>{{ store.view === 'chat' ? 'Chat' : store.view === 'board' ? 'Board' : store.view === 'questions' ? 'Questions' : store.view === 'usage' ? 'Usage' : store.view === 'agents' ? 'Agents' : 'Config' }}</h1>
             <span class="crumb" :title="store.workspace.path">{{ store.workspace.path }}</span>
           </div>
         </div>
@@ -382,6 +384,7 @@ async function openBoard() { store.view = 'board'; await refreshBoard() }
         <BoardView v-else-if="store.view === 'board'" />
         <QuestionsView v-else-if="store.view === 'questions'" />
         <UsageView v-else-if="store.view === 'usage'" />
+        <AgentsView v-else-if="store.view === 'agents'" />
         <ConfigView v-else />
       </div>
     </main>

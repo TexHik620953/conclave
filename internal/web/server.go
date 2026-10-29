@@ -31,6 +31,9 @@ type workspace struct {
 	App    *app.App
 	mu     sync.Mutex
 	cancel context.CancelFunc
+
+	agentMu sync.Mutex
+	agents  map[string]*AgentInfo
 }
 
 func NewServer() *Server {
@@ -66,6 +69,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/config/key", s.configKey)
 	mux.HandleFunc("/api/config/model", s.configModel)
 	mux.HandleFunc("/api/config/profile", s.configProfile)
+	mux.HandleFunc("/api/config/mcp", s.configMCP)
+	mux.HandleFunc("/api/config/search", s.configSearch)
 	mux.HandleFunc("/api/config/test", s.configTest)
 	mux.HandleFunc("/api/providers", s.providers)
 	mux.HandleFunc("/api/providers/models", s.providerModels)
@@ -73,6 +78,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/questions", s.questionsList)
 	mux.HandleFunc("/api/questions/answer", s.questionsAnswer)
 	mux.HandleFunc("/api/usage", s.usageView)
+	mux.HandleFunc("/api/agents", s.agentsList)
 	mux.HandleFunc("/api/board", s.board)
 	mux.HandleFunc("/api/board/task", s.boardTask)
 	mux.HandleFunc("/api/board/transition", s.boardTransition)

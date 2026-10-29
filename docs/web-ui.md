@@ -170,6 +170,27 @@ Usage can be grouped by:
 The view shows input/output tokens, request counts and context-window usage.
 Usage is attributed to sessions, tasks and agents where available.
 
+## Agents
+
+The Agents view is a live list of running model agents. Each row shows:
+
+- agent kind and ID;
+- related board task;
+- worker/profile role;
+- provider and model;
+- context usage;
+- input/output tokens;
+- running time and request count;
+- current phase/tool.
+
+Actions:
+
+- **Open task** switches to Board and opens the task detail modal.
+- **Profile** switches to Config → Profiles.
+
+The list is refreshed every two seconds while the view is open. Agents
+disappear when their run finishes or is cancelled.
+
 ## Config
 
 The Config view manages the global configuration:
@@ -179,7 +200,9 @@ The Config view manages the global configuration:
 - models and capabilities;
 - remote model discovery;
 - profiles;
-- worker routing, complexity ranges and concurrency limits.
+- worker routing, complexity ranges and concurrency limits;
+- MCP servers (stdio/HTTP, command/url/headers/environment, enabled);
+- native web search provider and keys.
 
 See [configuration.md](configuration.md) for the YAML schema.
 

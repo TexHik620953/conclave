@@ -1,10 +1,11 @@
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { api } from '../api'
-import { toast } from '../store'
+import { store, toast } from '../store'
 
 const cfg = ref(null)
-const tab = ref('providers')
+const tab = ref(store.configTab || 'providers')
+watch(() => store.configTab, value => { if (value) tab.value = value })
 const profileName = ref('')
 const profileForm = ref(null)
 const newProfileName = ref('')
@@ -27,7 +28,12 @@ const configError = ref('')
 let deleteTimer = null
 const manualModel = reactive({ id: '', context: 128000, max_output: 8192 })
 const remoteSearch = ref('')
+const mcpEditing = ref('')
+const mcpDeleteArmed = ref('')
+const mcpForm = reactive({ name: '', type: 'stdio', url: '', command: '', headers: '', environment: '', enabled: true })
+const searchForm = reactive({ provider: 'tavily', api_key: '', base_url: '', max_results: 5 })
 
+const mcpServers = computed(() => Object.values(cfg.value?.mcp || {}).sort((a, b) => a.name.localeCompare(b.name)))
 const providers = computed(() => {
   const p = cfg.value?.providers || {}
   return Object.values(p).sort((a, b) => a.name.localeCompare(b.name))
@@ -227,6 +233,66 @@ async function removeModel(m) {
     toast(e.message, 'error')
   }
 }
+
+function selectMCP(name) {
+  const m = cfg.value?.mcp?.[name]
+  if (!m) return
+  mcpEditing.value = name
+  mcpDeleteArmed.value = ''
+  Object.assign(mcpForm, {
+    name, type: m.type || 'stdio', url: m.url || '',
+    command: (m.command || []).join(' '),
+    headers: Object.entries(m.headers || {}).map(([k, v]) => `${k}=${v}`).join('\n'),
+    environment: Object.entries(m.environment || {}).map(([k, v]) => `${k}=${v}`).join('\n'),
+    enabled: m.enabled !== false,
+  })
+}
+function newMCP() {
+  mcpEditing.value = '__new__'
+  Object.assign(mcpForm, { name: '', type: 'stdio', url: '', command: '', headers: '', environment: '', enabled: true })
+}
+function linesToMap(raw) {
+  const out = {}
+  for (const line of String(raw || '').split('\n')) {
+    const i = line.indexOf('=')
+    if (i > 0) out[line.slice(0, i).trim()] = line.slice(i + 1)
+  }
+  return out
+}
+async function saveMCP() {
+  if (!mcpForm.name.trim()) { toast('MCP server name is required', 'error'); return }
+  const command = mcpForm.type === 'stdio' ? mcpForm.command.trim().split(/\s+/).filter(Boolean) : []
+  try {
+    await api.saveMCP({
+      name: mcpForm.name.trim(), type: mcpForm.type, url: mcpForm.url.trim(), command,
+      headers: linesToMap(mcpForm.headers), environment: linesToMap(mcpForm.environment), enabled: mcpForm.enabled,
+    })
+    await refresh()
+    mcpEditing.value = mcpForm.name.trim()
+    toast('MCP server saved')
+  } catch (e) { toast(e.message, 'error') }
+}
+async function removeMCP() {
+  if (!mcpEditing.value || mcpEditing.value === '__new__') return
+  if (mcpDeleteArmed.value !== mcpEditing.value) {
+    mcpDeleteArmed.value = mcpEditing.value
+    setTimeout(() => { mcpDeleteArmed.value = '' }, 4000)
+    return
+  }
+  try {
+    await api.deleteMCP(mcpEditing.value)
+    mcpEditing.value = ''
+    await refresh()
+    toast('MCP server deleted')
+  } catch (e) { toast(e.message, 'error') }
+}
+async function saveSearchConfig() {
+  try {
+    await api.saveSearch({ ...searchForm, max_results: Number(searchForm.max_results || 5) })
+    await refresh()
+    toast('search settings saved')
+  } catch (e) { toast(e.message, 'error') }
+}
 </script>
 
 <template>
@@ -236,6 +302,7 @@ async function removeModel(m) {
       <div class="config-tabs">
         <button :class="{ active: tab === 'providers' }" @click="tab = 'providers'">Providers & models</button>
         <button :class="{ active: tab === 'profiles' }" @click="tab = 'profiles'">Profiles</button>
+        <button :class="{ active: tab === 'mcp' }" @click="tab = 'mcp'">MCP & search</button>
       </div>
       <button v-if="tab === 'providers'" class="btn primary" @click="startAdd">＋ Add provider</button>
     </header>
@@ -376,6 +443,48 @@ async function removeModel(m) {
         </div>
       </div>
       <div v-else class="config-empty"><span>◇</span><h3>No profile selected</h3><p>Create a profile to configure models and workers.</p></div>
+    </div>
+
+    <div v-if="tab === 'mcp'" class="config-grid">
+      <aside class="provider-side">
+        <button v-for="m in mcpServers" :key="m.name" :class="['provider-item', { active: mcpEditing === m.name }]" @click="selectMCP(m.name)">
+          <span class="provider-name">{{ m.name }}</span>
+          <small>{{ m.type }} · {{ m.enabled === false ? 'disabled' : 'enabled' }}</small>
+        </button>
+        <button class="provider-item add" @click="newMCP">＋ Add MCP server</button>
+      </aside>
+      <div v-if="mcpEditing" class="config-editor">
+        <div class="editor-card">
+          <div class="editor-head">
+            <div><h3>{{ mcpEditing === '__new__' ? 'New MCP server' : mcpForm.name }}</h3><p class="muted">stdio or HTTP MCP server</p></div>
+            <button v-if="mcpEditing !== '__new__'" class="btn ghost danger" @click="removeMCP">{{ mcpDeleteArmed === mcpEditing ? 'Confirm delete' : 'Delete' }}</button>
+          </div>
+          <div class="form-row">
+            <label class="field"><span>Name</span><input v-model="mcpForm.name" placeholder="playwright" /></label>
+            <label class="field"><span>Transport</span><select v-model="mcpForm.type"><option value="stdio">stdio</option><option value="http">http</option></select></label>
+          </div>
+          <label class="field"><span>Command (stdio, space-separated)</span><input v-model="mcpForm.command" placeholder="npx -y @playwright/mcp@latest" /></label>
+          <label class="field"><span>URL (http)</span><input v-model="mcpForm.url" placeholder="https://example.com/mcp" /></label>
+          <div class="form-row">
+            <label class="field"><span>Headers, KEY=VALUE per line</span><textarea v-model="mcpForm.headers" rows="3"></textarea></label>
+            <label class="field"><span>Environment, KEY=VALUE per line</span><textarea v-model="mcpForm.environment" rows="3"></textarea></label>
+          </div>
+          <label class="field"><span><input v-model="mcpForm.enabled" type="checkbox" /> Enabled</span></label>
+          <div class="editor-actions"><button class="btn primary" @click="saveMCP">Save MCP server</button></div>
+        </div>
+
+        <div class="editor-card">
+          <div class="editor-head"><div><h3>Web search</h3><p class="muted">Native web_search provider</p></div></div>
+          <div class="form-row">
+            <label class="field"><span>Provider</span><select v-model="searchForm.provider"><option value="tavily">Tavily</option><option value="brave">Brave</option><option value="searxng">SearXNG</option><option value="exa">Exa</option></select></label>
+            <label class="field"><span>Max results</span><input v-model.number="searchForm.max_results" type="number" min="1" max="20" /></label>
+          </div>
+          <label class="field"><span>API key</span><input v-model="searchForm.api_key" type="password" :placeholder="cfg.search?.has_key ? 'Configured: ' + cfg.search.masked_key : 'API key'" /></label>
+          <label class="field"><span>Base URL (SearXNG)</span><input v-model="searchForm.base_url" placeholder="http://127.0.0.1:8080" /></label>
+          <div class="editor-actions"><button class="btn primary" @click="saveSearchConfig">Save search settings</button></div>
+        </div>
+      </div>
+      <div v-else class="config-empty"><span>◇</span><h3>MCP & search</h3><p>Add an MCP server or configure a web search provider.</p></div>
     </div>
   </section>
 </template>

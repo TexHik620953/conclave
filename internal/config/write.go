@@ -509,3 +509,70 @@ func DeleteGlobalProfile(name string) error {
 	delete(profiles, name)
 	return writeGlobalDoc(doc, path)
 }
+
+func UpsertGlobalMCP(name string, srv MCPServer) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("MCP server name is required")
+	}
+	doc, path, err := readGlobalDoc()
+	if err != nil {
+		return err
+	}
+	servers := ensureMap(doc, "mcp")
+	entry := map[string]any{}
+	if old, ok := servers[name].(map[string]any); ok {
+		entry = old
+	}
+	if srv.Type != "" {
+		entry["type"] = srv.Type
+	}
+	if len(srv.Command) > 0 {
+		entry["command"] = srv.Command
+	}
+	if srv.URL != "" {
+		entry["url"] = srv.URL
+	}
+	if len(srv.Headers) > 0 {
+		entry["headers"] = srv.Headers
+	}
+	if len(srv.Env) > 0 {
+		entry["environment"] = srv.Env
+	}
+	if srv.Enabled != nil {
+		entry["enabled"] = *srv.Enabled
+	}
+	servers[name] = entry
+	return writeGlobalDoc(doc, path)
+}
+
+func DeleteGlobalMCP(name string) error {
+	doc, path, err := readGlobalDoc()
+	if err != nil {
+		return err
+	}
+	servers := ensureMap(doc, "mcp")
+	delete(servers, strings.TrimSpace(name))
+	return writeGlobalDoc(doc, path)
+}
+
+func SetGlobalSearch(s SearchConfig) error {
+	doc, path, err := readGlobalDoc()
+	if err != nil {
+		return err
+	}
+	entry := ensureMap(doc, "search")
+	if s.Provider != "" {
+		entry["provider"] = s.Provider
+	}
+	if s.APIKey != "" {
+		entry["api_key"] = s.APIKey
+	}
+	if s.BaseURL != "" {
+		entry["base_url"] = s.BaseURL
+	}
+	if s.MaxResults > 0 {
+		entry["max_results"] = s.MaxResults
+	}
+	return writeGlobalDoc(doc, path)
+}

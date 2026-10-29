@@ -49,12 +49,14 @@ is stored locally under `.conclave/`.
 
 ### Web UI
 
-- Chat, Board, Questions, Usage and Config views.
+- Chat, Board, Questions, Usage, Agents and Config views.
 - Streaming responses, thinking blocks, tool cards and syntax highlighting.
 - Global notifications across workspaces.
 - Reconnect and state resynchronization after a reload.
 - Per-model/session/task token usage.
 - Runtime provider/model configuration.
+- Native web search (Tavily, Brave, SearXNG, Exa) and Markdown web fetching.
+- MCP server management and tool discovery.
 
 ### Questions workflow
 
@@ -240,6 +242,7 @@ Main views:
 | **Board** | Tasks, queue, attempts, logs, comments, review/apply |
 | **Questions** | Questions grouped by state and author |
 | **Usage** | Tokens by model or session |
+| **Agents** | Live agents, tasks, models, context and token usage |
 | **Config** | Providers, models, API keys and profiles |
 
 The top bar shows the workspace and the number of currently running agents.

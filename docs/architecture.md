@@ -138,7 +138,7 @@ interrupted claims return to the queue through recovery.
 The master is a normal agent with a restricted set of tools:
 
 ```text
-read_file, list_dir, glob, grep, git, web_fetch
+read_file, list_dir, glob, grep, git, web_fetch, web_search
 submit_plan, finish_run, create_task, list_tasks, comment_task,
 ask_user, list_workers
 ```

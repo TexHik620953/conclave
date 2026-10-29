@@ -127,7 +127,7 @@ func (s *Server) open(ctx context.Context, path string) (*workspace, error) {
 		return nil, err
 	}
 	sum := sha1.Sum([]byte(path))
-	ws := &workspace{ID: "ws_" + hex.EncodeToString(sum[:8]), Path: path, App: a}
+	ws := &workspace{ID: "ws_" + hex.EncodeToString(sum[:8]), Path: path, App: a, agents: map[string]*AgentInfo{}}
 
 	s.mu.Lock()
 	for _, existing := range s.workspaces {
@@ -147,6 +147,7 @@ func (s *Server) open(ctx context.Context, path string) (*workspace, error) {
 		defer unsub()
 		for ev := range ch {
 			ev.WorkspaceID = ws.ID
+			s.trackAgent(ws, ev)
 			s.global.Publish(ev)
 		}
 	}()
@@ -175,8 +176,12 @@ func (s *Server) statePayload(ws *workspace) map[string]any {
 	}
 	qcount, _ := ws.App.Questions().Count(context.Background())
 	queueStatus := ws.App.Queue().Status()
+	agents := queueStatus.Active
+	if st.Busy && agents == 0 {
+		agents = 1
+	}
 	p := map[string]any{
-		"counters":  map[string]any{"board": open, "questions": qcount, "agents": queueStatus.Active},
+		"counters":  map[string]any{"board": open, "questions": qcount, "agents": agents},
 		"workspace": map[string]any{"id": ws.ID, "path": ws.Path, "project": project},
 		"state":     st, "models": models, "providers": ws.App.Providers(),
 		"sessions": sessions, "profile": ws.App.ProfileConfig(),
@@ -533,7 +538,80 @@ func (s *Server) configGet(w http.ResponseWriter, r *http.Request) {
 			profiles[name] = p
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"providers": providers, "default_profile": cfg.DefaultProfile, "profiles": profiles})
+	mcpServers := map[string]any{}
+	for name, srv := range cfg.MCP {
+		enabled := true
+		if srv.Enabled != nil {
+			enabled = *srv.Enabled
+		}
+		mcpServers[name] = map[string]any{
+			"name": name, "type": srv.Type, "url": srv.URL, "command": srv.Command,
+			"headers": srv.Headers, "environment": srv.Env, "enabled": enabled,
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"providers": providers, "default_profile": cfg.DefaultProfile, "profiles": profiles,
+		"mcp": mcpServers,
+		"search": map[string]any{
+			"provider": cfg.Search.Provider, "base_url": cfg.Search.BaseURL,
+			"max_results": cfg.Search.MaxResults, "has_key": cfg.Search.APIKey != "",
+			"masked_key": config.MaskKey(cfg.Search.APIKey),
+		},
+	})
+}
+
+func (s *Server) configMCP(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodDelete {
+		if err := config.DeleteGlobalMCP(r.URL.Query().Get("name")); err != nil {
+			httpError(w, err, http.StatusBadRequest)
+			return
+		}
+		s.reloadAll()
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		return
+	}
+	var req struct {
+		Name    string            `json:"name"`
+		Type    string            `json:"type"`
+		URL     string            `json:"url"`
+		Command []string          `json:"command"`
+		Headers map[string]string `json:"headers"`
+		Env     map[string]string `json:"environment"`
+		Enabled *bool             `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpError(w, err, http.StatusBadRequest)
+		return
+	}
+	if err := config.UpsertGlobalMCP(req.Name, config.MCPServer{
+		Type: req.Type, URL: req.URL, Command: req.Command, Headers: req.Headers, Env: req.Env, Enabled: req.Enabled,
+	}); err != nil {
+		httpError(w, err, http.StatusBadRequest)
+		return
+	}
+	s.reloadAll()
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (s *Server) configSearch(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Provider   string `json:"provider"`
+		APIKey     string `json:"api_key"`
+		BaseURL    string `json:"base_url"`
+		MaxResults int    `json:"max_results"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpError(w, err, http.StatusBadRequest)
+		return
+	}
+	if err := config.SetGlobalSearch(config.SearchConfig{
+		Provider: req.Provider, APIKey: req.APIKey, BaseURL: req.BaseURL, MaxResults: req.MaxResults,
+	}); err != nil {
+		httpError(w, err, http.StatusBadRequest)
+		return
+	}
+	s.reloadAll()
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (s *Server) configProvider(w http.ResponseWriter, r *http.Request) {

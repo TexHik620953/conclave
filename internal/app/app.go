@@ -452,6 +452,7 @@ func (a *App) send(ctx context.Context, text string, appendUser bool) error {
 			a.jobMgr.AddTo(reg)
 		}
 	}
+	tools.AddWebSearch(reg, a.cfg.Search)
 	if a.track != nil {
 		for _, t := range conclave.TaskTools(a.track) {
 			reg.Add(t)
@@ -802,7 +803,7 @@ func (a *App) Queue() *board.Runner {
 	if a.queue == nil {
 		a.queue = board.New(board.Deps{
 			Config: a.cfg, Profile: a.profile, Tracker: a.track, Bus: a.bus,
-			Cwd: a.cwd, Client: a.clientUnlocked, Usage: a.usage, Questions: a.questions,
+			Cwd: a.cwd, Client: a.clientUnlocked, Usage: a.usage, Questions: a.questions, MCP: a.mcpMgr,
 		})
 	}
 	return a.queue
@@ -924,6 +925,10 @@ func (a *App) reloadConfig() error {
 	if err != nil {
 		return err
 	}
+	if a.mcpMgr != nil {
+		a.mcpMgr.Close()
+	}
+	a.mcpMgr = mcp.Connect(context.Background(), cfg.MCP)
 	a.cfg = cfg
 	a.profile = profile
 	a.clients = map[string]llm.Client{}

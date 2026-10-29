@@ -16,6 +16,7 @@ import (
 	"github.com/texhik/conclave/internal/event"
 	"github.com/texhik/conclave/internal/gitx"
 	"github.com/texhik/conclave/internal/llm"
+	"github.com/texhik/conclave/internal/mcp"
 	"github.com/texhik/conclave/internal/prompt"
 	"github.com/texhik/conclave/internal/questions"
 	"github.com/texhik/conclave/internal/tools"
@@ -34,6 +35,7 @@ type Deps struct {
 	Client    ClientFactory
 	Usage     *usage.Service
 	Questions *questions.Service
+	MCP       *mcp.Manager
 }
 
 type Status struct {
@@ -276,7 +278,7 @@ func (r *Runner) execute(ctx context.Context, task tracker.Task, w config.Worker
 	rt := agent.New(agent.Config{
 		AgentID: agentID, SessionID: "board", RunID: runID, TaskID: task.ID,
 		Model: model, Client: client, System: system, Effort: w.Effort, MaxSteps: w.MaxSteps,
-		Cwd: dir, Mode: domain.ModeBuild, Tools: boardTools(r.deps.Tracker, r.deps.Questions), Events: r.deps.Bus,
+		Cwd: dir, Mode: domain.ModeBuild, Tools: boardTools(r.deps.Tracker, r.deps.Questions, r.deps.Config.Search, r.deps.MCP, w), Events: r.deps.Bus,
 		Permissions: tools.Env{Cwd: dir, Mode: domain.ModeBuild, Permissions: r.deps.Config.Permissions},
 		OnEvent: func(ev domain.Event) {
 			r.logEvent(attempt.ID, task.ID, ev)
@@ -398,8 +400,15 @@ func sum(m map[string]int) int {
 	return n
 }
 
-func boardTools(tr *tracker.Service, qsvc *questions.Service) *tools.Registry {
+func boardTools(tr *tracker.Service, qsvc *questions.Service, searchCfg config.SearchConfig, mcpMgr *mcp.Manager, w config.WorkerConfig) *tools.Registry {
 	reg := tools.Builtins()
+	if len(w.Tools) > 0 {
+		reg = reg.Only(w.Tools...)
+	}
+	tools.AddWebTools(reg, searchCfg)
+	if mcpMgr != nil {
+		mcpMgr.AddTo(reg)
+	}
 	for _, tool := range conclave.TaskTools(tr) {
 		reg.Add(tool)
 	}
