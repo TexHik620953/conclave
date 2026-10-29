@@ -1,9 +1,9 @@
 /conclave
-/test/
 /bin/
-/.conclave/runs/
+/.conclave/
+.env
 *.db
 *.db-shm
 *.db-wal
-web/node_modules/
 sess.json
+web/node_modules/

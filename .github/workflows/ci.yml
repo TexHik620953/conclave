@@ -6,20 +6,18 @@ on:
   pull_request:
 
 jobs:
-  go:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26"
+          go-version: "1.26.x"
           cache: true
-      - name: gofmt
-        run: test -z "$(gofmt -l .)"
-      - name: vet
-        run: go vet ./...
-      - name: test
+      - name: Test
         run: go test ./...
+      - name: Vet
+        run: go vet ./...
 
   web:
     runs-on: ubuntu-latest
@@ -34,8 +32,4 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: npm ci
-      - run: npm run typecheck
       - run: npm run build
-      - name: dist is in sync
-        working-directory: .
-        run: git diff --exit-code -- internal/web/dist

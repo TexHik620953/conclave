@@ -1,113 +1,45 @@
 package store
 
 import (
-	"database/sql"
+	"context"
 	"path/filepath"
 	"testing"
 	"time"
 
-	_ "modernc.org/sqlite"
+	"github.com/texhik/conclave/internal/domain"
 )
 
-func TestListRunsHandlesNullColumns(t *testing.T) {
-	dir := t.TempDir()
-	st, err := Open("", dir)
+func TestSessionAndRunRoundTrip(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
-
-	// Simulate a legacy/interrupted row with NULL error and finished_at.
-	db, err := sql.Open("sqlite", filepath.Join(dir, "conclave.db"))
+	defer s.Close()
+	ctx := context.Background()
+	sess := &domain.Session{
+		ID: "ses_1", Title: "test", Cwd: "/tmp", Mode: domain.ModeBuild,
+		Model: "p/m", Effort: "medium", CreatedAt: time.Now(),
+		Messages: []domain.Message{{Role: domain.RoleUser, Content: "hi"}},
+	}
+	if err := s.SaveSession(ctx, sess); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.LoadSession(ctx, "ses_1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`INSERT INTO runs (id, pipeline, status) VALUES ('legacy', 'p', 'running')`); err != nil {
+	if len(got.Messages) != 1 || got.Messages[0].Content != "hi" {
+		t.Fatalf("messages: %#v", got.Messages)
+	}
+	run := &domain.Run{ID: "run_1", SessionID: "ses_1", Phase: domain.RunPlanning, CreatedAt: time.Now()}
+	if err := s.SaveRun(ctx, run); err != nil {
 		t.Fatal(err)
 	}
-	db.Close()
-
-	st, err = Open("", dir)
+	gotRun, err := s.LatestRun(ctx, "ses_1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
-
-	runs, err := st.ListRuns(10)
-	if err != nil {
-		t.Fatalf("ListRuns: %v", err)
-	}
-	if len(runs) != 1 {
-		t.Fatalf("runs = %d", len(runs))
-	}
-	if runs[0].Status != "interrupted" {
-		t.Errorf("status = %q, want interrupted", runs[0].Status)
-	}
-	if runs[0].Error != "" {
-		t.Errorf("error = %q, want empty", runs[0].Error)
-	}
-	if _, err := st.GetRun("legacy"); err != nil {
-		t.Fatalf("GetRun: %v", err)
-	}
-}
-
-func TestRevertFrom(t *testing.T) {
-	dir := t.TempDir()
-	st, err := Open("", dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-
-	base := time.Now().UTC()
-	nodes := []NodeRecord{
-		{RunID: "r", NodeID: "a", Status: "completed", StartedAt: base},
-		{RunID: "r", NodeID: "b", Status: "completed", StartedAt: base.Add(time.Second)},
-		{RunID: "r", NodeID: "c", Status: "completed", StartedAt: base.Add(2 * time.Second)},
-	}
-	for _, n := range nodes {
-		if err := st.SaveNode(n); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := st.RevertFrom("r", "b"); err != nil {
-		t.Fatal(err)
-	}
-	left, err := st.ListNodes("r")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(left) != 1 || left[0].NodeID != "a" {
-		t.Fatalf("after revert left = %+v, want [a]", left)
-	}
-	if err := st.RevertFrom("r", "missing"); err == nil {
-		t.Fatal("expected error for unknown node")
-	}
-}
-
-func TestCreateRunRoundTrip(t *testing.T) {
-	dir := t.TempDir()
-	st, err := Open("", dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-
-	if err := st.CreateRun(Run{ID: "r1", Pipeline: "t", Task: "do", Workspace: dir}); err != nil {
-		t.Fatal(err)
-	}
-	run, err := st.GetRun("r1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if run.Status != "running" || run.Error != "" || !run.FinishedAt.IsZero() {
-		t.Fatalf("unexpected run: %+v", run)
-	}
-	if err := st.FinishRun("r1", "completed", ""); err != nil {
-		t.Fatal(err)
-	}
-	run, _ = st.GetRun("r1")
-	if run.Status != "completed" || run.FinishedAt.IsZero() {
-		t.Fatalf("unexpected run after finish: %+v", run)
+	if gotRun.ID != "run_1" {
+		t.Fatalf("run id: %s", gotRun.ID)
 	}
 }
