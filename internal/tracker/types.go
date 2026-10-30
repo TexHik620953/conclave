@@ -72,6 +72,7 @@ type Result struct {
 	AttemptNo int        `json:"attempt_no"`
 	Content   string     `json:"content"`
 	Verdict   string     `json:"verdict"`
+	Feedback  string     `json:"feedback,omitempty"`
 	CreatedAt time.Time  `json:"created_at"`
 	DecidedAt *time.Time `json:"decided_at,omitempty"`
 	DecidedBy string     `json:"decided_by,omitempty"`

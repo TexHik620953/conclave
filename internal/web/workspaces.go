@@ -43,7 +43,11 @@ func (r *workspaceRegistry) load() {
 	var list []WorkspaceRecord
 	if json.Unmarshal(b, &list) == nil {
 		for _, item := range list {
-			r.items[item.Path] = item
+			// Prune missing entries once at startup. The hot list endpoint does
+			// not stat paths, which keeps it fast on external/FUSE mounts.
+			if st, err := os.Stat(item.Path); err == nil && st.IsDir() {
+				r.items[item.Path] = item
+			}
 		}
 	}
 }

@@ -133,8 +133,8 @@ CREATE TABLE IF NOT EXISTS task_blockers (
 );
 CREATE TABLE IF NOT EXISTS task_results (
   id TEXT PRIMARY KEY, task_id TEXT NOT NULL, attempt_id TEXT NOT NULL, attempt_no INTEGER NOT NULL,
-  content TEXT NOT NULL, verdict TEXT NOT NULL DEFAULT 'pending', created_at TEXT NOT NULL,
-  decided_at TEXT, decided_by TEXT NOT NULL DEFAULT ''
+  content TEXT NOT NULL, verdict TEXT NOT NULL DEFAULT 'pending', feedback TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL, decided_at TEXT, decided_by TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS task_results_task ON task_results(task_id,created_at DESC);
 `)
@@ -144,6 +144,7 @@ CREATE INDEX IF NOT EXISTS task_results_task ON task_results(task_id,created_at 
 	_, _ = s.db.Exec(`ALTER TABLE tracker_tasks ADD COLUMN failure_reason TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.db.Exec(`ALTER TABLE tracker_tasks ADD COLUMN failure_at TEXT`)
 	_, _ = s.db.Exec(`ALTER TABLE tracker_tasks ADD COLUMN base_commit TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE task_results ADD COLUMN feedback TEXT NOT NULL DEFAULT ''`)
 	// Older versions used a dedicated failed status. Keep the failure marker
 	// visible, but failed tasks belong to Backlog.
 	_, _ = s.db.Exec(`UPDATE tracker_tasks SET status='backlog',
@@ -406,9 +407,9 @@ func (s *Service) Transition(ctx context.Context, id string, to TaskStatus, acto
 	if t.Status == StatusReview {
 		switch to {
 		case StatusDone:
-			s.decidePendingResults(ctx, id, "approved", actor)
+			s.decidePendingResults(ctx, id, "approved", actor, "")
 		case StatusReady, StatusBacklog:
-			s.decidePendingResults(ctx, id, "rejected", actor)
+			s.decidePendingResults(ctx, id, "rejected", actor, "")
 		}
 	}
 	if to == StatusReady {
@@ -1056,7 +1057,7 @@ func (s *Service) SaveResult(ctx context.Context, taskID, attemptID string, atte
 }
 
 func (s *Service) Results(ctx context.Context, taskID string) ([]Result, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,task_id,attempt_id,attempt_no,content,verdict,created_at,decided_at,decided_by
+	rows, err := s.db.QueryContext(ctx, `SELECT id,task_id,attempt_id,attempt_no,content,verdict,feedback,created_at,decided_at,decided_by
 		FROM task_results WHERE task_id=? ORDER BY created_at DESC`, taskID)
 	if err != nil {
 		return nil, err
@@ -1067,7 +1068,7 @@ func (s *Service) Results(ctx context.Context, taskID string) ([]Result, error) 
 		var r Result
 		var created string
 		var decided sql.NullString
-		if err := rows.Scan(&r.ID, &r.TaskID, &r.AttemptID, &r.AttemptNo, &r.Content, &r.Verdict, &created, &decided, &r.DecidedBy); err != nil {
+		if err := rows.Scan(&r.ID, &r.TaskID, &r.AttemptID, &r.AttemptNo, &r.Content, &r.Verdict, &r.Feedback, &created, &decided, &r.DecidedBy); err != nil {
 			return nil, err
 		}
 		r.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
@@ -1080,10 +1081,18 @@ func (s *Service) Results(ctx context.Context, taskID string) ([]Result, error) 
 	return out, rows.Err()
 }
 
-func (s *Service) decidePendingResults(ctx context.Context, taskID, verdict, actor string) {
+func (s *Service) decidePendingResults(ctx context.Context, taskID, verdict, actor, feedback string) {
 	now := time.Now().Format(time.RFC3339Nano)
-	_, _ = s.db.ExecContext(ctx, `UPDATE task_results SET verdict=?,decided_at=?,decided_by=? WHERE task_id=? AND verdict='pending'`,
-		verdict, now, actor, taskID)
+	_, _ = s.db.ExecContext(ctx, `UPDATE task_results SET verdict=?,decided_at=?,decided_by=?,
+		feedback=CASE WHEN ?<>'' THEN ? ELSE feedback END WHERE task_id=? AND verdict='pending'`,
+		verdict, now, actor, feedback, feedback, taskID)
+}
+
+func (s *Service) SetPendingResultFeedback(ctx context.Context, taskID, feedback string) {
+	if strings.TrimSpace(feedback) == "" {
+		return
+	}
+	_, _ = s.db.ExecContext(ctx, `UPDATE task_results SET feedback=? WHERE task_id=? AND verdict='pending'`, feedback, taskID)
 }
 
 func (s *Service) backfillResults() {

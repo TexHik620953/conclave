@@ -1017,3 +1017,11 @@ select, option { color: #f0eee6; background-color: #201f1c; }
 .server-hint span { color: var(--dim); text-transform: uppercase; letter-spacing: .08em; font-size: 9px; width: 100%; }
 .server-hint code, .server-warning code { color: var(--accent-2); }
 .server-warning { margin-top: 12px; padding: 10px 12px; border: 1px solid rgba(227,182,92,.25); background: rgba(227,182,92,.06); color: var(--yellow); border-radius: 8px; font-size: 11px; }
+
+.result-feedback { margin: 0 15px 12px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border-soft); background: rgba(20,19,17,.35); }
+.result-feedback b { display: block; margin-bottom: 4px; font-size: 9px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); }
+.result-feedback p { white-space: pre-wrap; color: var(--text); font-size: 11px; line-height: 1.55; }
+.result-feedback.rejected { border-color: rgba(255,107,122,.25); background: rgba(255,107,122,.05); }
+.result-feedback.rejected b { color: var(--red); }
+.result-feedback.approved { border-color: rgba(95,211,156,.2); background: rgba(95,211,156,.04); }
+.result-feedback.approved b { color: var(--green); }

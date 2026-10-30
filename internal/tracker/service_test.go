@@ -257,9 +257,10 @@ func TestResultVersionsAndVerdict(t *testing.T) {
 		t.Fatal(err)
 	}
 	task, _ = tr.Transition(ctx, task.ID, StatusReview, "worker")
+	tr.SetPendingResultFeedback(ctx, task.ID, "fix the failing test")
 	task, _ = tr.Transition(ctx, task.ID, StatusReady, "user")
 	results, _ := tr.Results(ctx, task.ID)
-	if len(results) != 1 || results[0].Verdict != "rejected" {
+	if len(results) != 1 || results[0].Verdict != "rejected" || results[0].Feedback != "fix the failing test" {
 		t.Fatalf("after reject: %#v", results)
 	}
 	task, _ = tr.Transition(ctx, task.ID, StatusClaimed, "worker")

@@ -622,6 +622,10 @@ const stats = computed(() => {
                     <time>{{ new Date(r.created_at).toLocaleString() }}</time>
                   </header>
                   <pre>{{ r.content }}</pre>
+                  <div v-if="r.feedback" :class="['result-feedback', r.verdict]">
+                    <b>Review feedback</b>
+                    <p>{{ r.feedback }}</p>
+                  </div>
                   <small v-if="r.decided_at">Decided {{ new Date(r.decided_at).toLocaleString() }}<template v-if="r.decided_by"> by {{ r.decided_by }}</template></small>
                 </article>
               </div>

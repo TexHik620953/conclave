@@ -1524,6 +1524,7 @@ func (s *Service) approveBoardTask(ctx context.Context, boardID, actor, feedback
 	}
 	if strings.TrimSpace(feedback) != "" {
 		_, _ = s.tasks.AddComment(ctx, boardID, actor, feedback)
+		s.tasks.SetPendingResultFeedback(ctx, boardID, feedback)
 	}
 	if _, err := s.tasks.Transition(ctx, boardID, tracker.StatusDone, actor); err != nil {
 		return err
@@ -1545,6 +1546,7 @@ func (s *Service) rejectBoardTask(ctx context.Context, boardID, actor, feedback 
 	}
 	if strings.TrimSpace(feedback) != "" {
 		_, _ = s.tasks.AddComment(ctx, boardID, actor, feedback)
+		s.tasks.SetPendingResultFeedback(ctx, boardID, feedback)
 	}
 	if _, err := s.tasks.Transition(ctx, boardID, tracker.StatusReady, actor); err != nil {
 		return err
