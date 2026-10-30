@@ -249,8 +249,17 @@ func (a *App) SetProfile(name string) error {
 	err := a.reloadConfig()
 	a.mu.Lock()
 	a.profileOverride = previousOverride
+	if err == nil {
+		// Profile switching is an explicit model-routing change: reset the
+		// Build session model/effort to the selected profile defaults.
+		a.session.Model = a.profile.Agent.Model
+		a.session.Effort = a.profile.Agent.Effort
+	}
 	a.mu.Unlock()
-	return err
+	if err != nil {
+		return err
+	}
+	return a.store.SaveSession(context.Background(), a.session)
 }
 
 func (a *App) Sessions(ctx context.Context) ([]SessionInfo, error) {
