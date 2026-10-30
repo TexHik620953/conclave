@@ -114,6 +114,7 @@ func New(ctx context.Context, cwd, profileName string) (*App, error) {
 		return nil, err
 	}
 	bus := event.New()
+	tr.SetBus(bus)
 	qsvc, err := questions.New(st.DB(), tr, bus)
 	if err != nil {
 		st.Close()
@@ -164,6 +165,7 @@ func New(ctx context.Context, cwd, profileName string) (*App, error) {
 	}
 	repairSession(sess)
 	a.ensureConclave()
+	_ = tr.RefreshAllDependencyBlockers(context.Background())
 	recovered, _ := tr.RecoverInterrupted(ctx, "server restarted while the task was running")
 	if recovered > 0 {
 		bus.Publish(domain.Event{Time: time.Now(), Type: "board.changed", Text: fmt.Sprintf("recovered %d interrupted task(s)", recovered)})

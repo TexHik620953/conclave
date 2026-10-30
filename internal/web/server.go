@@ -70,6 +70,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/config/key", s.configKey)
 	mux.HandleFunc("/api/config/model", s.configModel)
 	mux.HandleFunc("/api/config/profile", s.configProfile)
+	mux.HandleFunc("/api/config/default-profile", s.configDefaultProfile)
 	mux.HandleFunc("/api/config/mcp", s.configMCP)
 	mux.HandleFunc("/api/config/search", s.configSearch)
 	mux.HandleFunc("/api/config/test", s.configTest)

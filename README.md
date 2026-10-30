@@ -33,6 +33,8 @@ is stored locally under `.conclave/`.
 - Jira-like task board stored in SQLite.
 - Dependencies, priorities, complexity classes, write scopes and acceptance
   criteria.
+- Tasks waiting on unfinished dependencies are **Blocked** with clickable
+  blocker links to the blocking task or question.
 - Atomic task claims with leases and heartbeats.
 - Worker selection by complexity range and provider concurrency limits.
 - Task attempts, execution logs, comments, branches and commits.
@@ -231,7 +233,10 @@ by Build, Conclave and Board tasks in that workspace.
 Worker concurrency is the minimum of:
 
 ```text
-worker instances, provider max_parallel, profile max_parallel
+worker.instances,
+provider.max_parallel,
+profile.limits.providers[provider],
+profile.limits.max_parallel
 ```
 
 See [docs/configuration.md](docs/configuration.md) for the full schema,
@@ -256,7 +261,10 @@ Main views:
 | **Questions** | Questions grouped by state and author |
 | **Usage** | Tokens by model or session |
 | **Agents** | Live agents, tasks, models, context and token usage |
-| **Config** | Providers, models, API keys and profiles |
+
+**Global config** is opened from the gear button in the top bar or from the
+workspace picker. It manages providers, models, API keys, profiles, MCP servers,
+search and timeouts independently of the active workspace.
 
 The top bar shows the workspace and the number of currently running agents.
 

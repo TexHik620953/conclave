@@ -154,6 +154,16 @@ async function removeTask(task) {
     await refreshBoard()
   } catch (e) { toast(e.message, 'error') }
 }
+function openBlocker(blocker) {
+  if (!blocker) return
+  if (blocker.kind === 'question') {
+    store.openQuestionId = blocker.ref_id
+    store.view = 'questions'
+    return
+  }
+  store.openTaskId = blocker.ref_id
+  store.view = 'board'
+}
 async function openDetail(task) {
   if (suppressClick) return
   try {
@@ -338,6 +348,11 @@ const stats = computed(() => {
               <span v-if="task.failure_at || task.failure_reason" class="task-failed-badge">FAILED</span>
             </div>
             <h3>{{ task.title }}</h3>
+            <div v-if="task.blockers?.length" class="task-blockers">
+              <button v-for="b in task.blockers" :key="b.kind + b.ref_id" :title="b.reason" @click.stop="openBlocker(b)">
+                Blocked by {{ b.kind === 'question' ? 'question' : b.ref_id }}
+              </button>
+            </div>
             <div class="task-meta">
               <span v-if="task.component" class="tag">{{ task.component }}</span>
               <span v-for="l in task.labels" :key="l" class="tag">{{ l }}</span>
@@ -523,6 +538,14 @@ const stats = computed(() => {
               <span class="side-label">Worker</span>
               <b>{{ detailTask.assignee || detailTask.created_by }}</b>
               <small>{{ detailTask.attempts }} attempt(s)</small>
+            </div>
+            <div v-if="detailTask.blockers?.length" class="side-block">
+              <span class="side-label">Blocked by</span>
+              <div class="blocker-list">
+                <button v-for="b in detailTask.blockers" :key="b.kind + b.ref_id" :title="b.reason" @click="openBlocker(b)">
+                  {{ b.kind === 'question' ? 'Question: ' + b.ref_id : b.ref_id }}
+                </button>
+              </div>
             </div>
             <div v-if="detailTask.branch || detailTask.commit" class="side-block">
               <span class="side-label">Execution</span>

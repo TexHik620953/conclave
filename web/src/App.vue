@@ -28,6 +28,7 @@ const providerForm = reactive({ name: '', base_url: 'https://openrouter.ai/api/v
 const loadingModels = ref(false)
 const forgetArmed = ref('')
 const sessionDeleteArmed = ref(false)
+const globalConfigOpen = ref(false)
 
 const session = computed(() => store.state?.session)
 const isConclave = computed(() => session.value?.mode === 'conclave')
@@ -46,6 +47,7 @@ onMounted(async () => {
   recent.value = JSON.parse(localStorage.getItem('conclave.recent') || '[]')
   await loadRecent()
   window.addEventListener('conclave-command', onCommand)
+  window.addEventListener('conclave-config-warning', onConfigWarning)
   store.globalDisconnect = connectGlobalEvents(handleGlobalEvent)
   const params = new URLSearchParams(location.search)
   const direct = params.get('workspace')
@@ -69,6 +71,7 @@ onMounted(async () => {
 })
 onBeforeUnmount(() => {
   window.removeEventListener('conclave-command', onCommand)
+  window.removeEventListener('conclave-config-warning', onConfigWarning)
   if (store.globalDisconnect) store.globalDisconnect()
   closeWorkspace()
 })
@@ -77,6 +80,12 @@ watch(() => store.view, (v) => {
   if (v === 'board' && store.workspace) refreshBoard()
 })
 watch([() => store.workspace?.path, () => store.view, () => store.state?.session?.id, () => store.state?.session?.mode], () => syncRoute())
+
+function onConfigWarning(event) {
+  for (const warning of event.detail || []) {
+    toast('config saved but not applied: ' + warning, 'error')
+  }
+}
 
 function syncRoute() {
   if (!store.workspace) {
@@ -240,10 +249,19 @@ async function openBoard() { store.view = 'board'; await refreshBoard() }
 </script>
 
 <template>
-  <div v-if="!store.workspace" class="workspace-screen">
+  <div v-if="globalConfigOpen" class="global-config-page">
+    <header class="global-config-head">
+      <button class="workspace-back" @click="globalConfigOpen = false">← Workspaces</button>
+      <span>Global configuration</span>
+    </header>
+    <ConfigView />
+  </div>
+
+  <div v-else-if="!store.workspace" class="workspace-screen">
     <div class="workspace-glow"></div>
     <main class="workspace-card">
       <div class="ws-hero">
+        <button class="global-config-btn" @click="globalConfigOpen = true">⚙ Global config</button>
         <div class="brand big"><span class="brand-mark">C</span><span>Conclave</span></div>
         <span class="eyebrow">LOCAL MULTI-AGENT WORKSPACE</span>
         <h1>Your work, in one place.</h1>
@@ -316,7 +334,6 @@ async function openBoard() { store.view = 'board'; await refreshBoard() }
         <button :class="{ active: store.view === 'questions' }" @click="store.view='questions'"><span>?</span> Questions <em class="nav-count">{{ store.counters.questions }}</em></button>
         <button :class="{ active: store.view === 'usage' }" @click="store.view='usage'"><span>◔</span> Usage</button>
         <button :class="{ active: store.view === 'agents' }" @click="store.view='agents'"><span>◎</span> Agents <em class="nav-count">{{ store.counters.agents || 0 }}</em></button>
-        <button :class="{ active: store.view === 'config' }" @click="store.view='config'"><span>⚙</span> Config</button>
       </nav>
 
       <div class="side-section">
@@ -366,6 +383,7 @@ async function openBoard() { store.view = 'board'; await refreshBoard() }
           </div>
         </div>
         <div class="topbar-controls">
+          <button :class="['topbar-config', { active: store.view === 'config' }]" title="Global configuration" @click="store.view = 'config'">⚙</button>
           <select class="profile-select" :value="store.profileName" title="Workspace profile" @change="changeProfile">
             <option v-for="name in store.profiles" :key="name" :value="name">{{ name }}</option>
           </select>

@@ -140,6 +140,18 @@ Task detail contains:
 
 Tasks that are `claimed` or `in_progress` cannot be deleted.
 
+### Dependency blockers
+
+A Ready task whose dependencies are not Done is automatically moved to
+**Blocked**. The task card and detail panel show a clickable **Blocked by** link:
+
+- a task link opens that task on the Board;
+- a question link opens the Questions view and expands that question set.
+
+When all dependency blockers are resolved the task returns to Ready
+automatically. Question blockers work the same way after the question is
+answered or deleted.
+
 ### Plan approval
 
 When Conclave has a pending plan, the board shows a banner:
@@ -205,9 +217,10 @@ Actions:
 The list is refreshed every two seconds while the view is open. Agents
 disappear when their run finishes or is cancelled.
 
-## Config
+## Global config
 
-The Config view manages the global configuration:
+The Config view manages the global configuration and is accessible without
+opening a workspace:
 
 - providers and base URLs;
 - API keys;
@@ -216,7 +229,11 @@ The Config view manages the global configuration:
 - profiles;
 - worker routing, complexity ranges and concurrency limits;
 - MCP servers (stdio/HTTP, command/url/headers/environment, enabled);
-- native web search provider and keys.
+- native web search provider and keys;
+- global default profile;
+- per-profile provider concurrency caps;
+- worker instances and complexity ranges;
+- per-profile LLM timeouts.
 
 See [configuration.md](configuration.md) for the YAML schema.
 

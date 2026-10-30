@@ -7,6 +7,7 @@ const cfg = ref(null)
 const tab = ref(store.configTab || 'providers')
 watch(() => store.configTab, value => { if (value) tab.value = value })
 const profileName = ref('')
+const defaultProfile = ref('')
 const profileForm = ref(null)
 const newProfileName = ref('')
 const workerRoleOptions = ['coder', 'senior', 'verifier', 'reviewer', 'tester', 'integrator', 'researcher', 'docs']
@@ -62,6 +63,7 @@ async function load() {
     cfg.value = await api.config()
     if (!selected.value) selected.value = providers.value[0]?.name || ''
     if (selected.value && cfg.value.providers?.[selected.value]) selectProvider(selected.value)
+    defaultProfile.value = cfg.value.default_profile || ''
     if (!profileName.value) profileName.value = cfg.value.default_profile || profileNames.value[0] || ''
     if (profileName.value && cfg.value.profiles?.[profileName.value]) loadProfile(profileName.value)
   } catch (e) { toast(e.message, 'error') }
@@ -189,6 +191,13 @@ function createProfile() {
   cfg.value.profiles[name] = src
   newProfileName.value = ''
   loadProfile(name)
+}
+async function saveDefaultProfile() {
+  try {
+    await api.setDefaultProfile(defaultProfile.value)
+    await refresh()
+    toast('global default profile: ' + defaultProfile.value)
+  } catch (e) { toast(e.message, 'error') }
 }
 async function saveProfile() {
   if (!profileForm.value || !profileName.value) return
@@ -393,6 +402,12 @@ async function saveSearchConfig() {
 
     <div v-if="tab === 'profiles'" class="profiles-layout">
       <aside class="profile-side">
+        <label class="field">
+          <span>Global default profile</span>
+          <select v-model="defaultProfile" @change="saveDefaultProfile">
+            <option v-for="p in profileNames" :key="p" :value="p">{{ p }}</option>
+          </select>
+        </label>
         <button v-for="p in profileNames" :key="p" :class="['provider-item', { active: profileName === p }]" @click="loadProfile(p)">
           <span class="provider-name">{{ p }}</span>
           <small>{{ p === cfg.default_profile ? 'default profile' : 'profile' }}</small>
@@ -420,6 +435,16 @@ async function saveSearchConfig() {
           <div class="form-row">
             <label class="field"><span>Max parallel</span><input v-model.number="profileForm.limits.max_parallel" type="number" min="1" /></label>
             <label class="field"><span>Max iterations</span><input v-model.number="profileForm.limits.max_iterations" type="number" min="1" /></label>
+          </div>
+          <div class="field full">
+            <span>Provider concurrency caps</span>
+            <small class="muted">Effective provider limit = min(provider max_parallel, this value, worker instances).</small>
+            <div class="provider-limit-grid">
+              <label v-for="p in providers" :key="p.name" class="field">
+                <span>{{ p.name }}</span>
+                <input v-model.number="profileForm.limits.providers[p.name]" type="number" min="1" :placeholder="'provider: ' + (p.max_parallel || 8)" />
+              </label>
+            </div>
           </div>
           <div class="form-row">
             <label class="field"><span>Agent max steps</span><input v-model.number="profileForm.agent.max_steps" type="number" min="1" placeholder="120" /></label>

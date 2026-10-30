@@ -155,8 +155,19 @@ Workers execute board tasks.
 Worker concurrency is limited by:
 
 ```text
-min(worker.instances, provider.max_parallel, profile.limits.max_parallel)
+min(
+  worker.instances,
+  provider.max_parallel,
+  profile.limits.providers[provider],
+  profile.limits.max_parallel
+)
 ```
+
+If a profile defines a provider cap, it overrides the provider-level
+`max_parallel`. For example, provider `openrouter.max_parallel: 16` with
+`limits.providers.openrouter: 8` still limits the run to 8 openrouter agents.
+
+The Profiles editor in the Web UI exposes these per-provider caps.
 
 ### Timeouts
 
@@ -363,4 +374,9 @@ The web UI **Config** view can:
 - add/edit/delete models;
 - edit profiles and worker settings.
 
-Changes are written to the global config and reloaded into open workspaces.
+Changes are written to the global config and reloaded into idle workspaces.
+
+If a workspace has an active agent, Conclave run or queue, the config is saved
+but cannot be applied to that live runtime. The API returns a warning and the UI
+shows it as a toast. Restart the server or wait until the workspace is idle and
+reload configuration to apply it.

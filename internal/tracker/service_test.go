@@ -197,3 +197,40 @@ func TestFailedTaskCanBeRetried(t *testing.T) {
 		t.Fatalf("retried task = status %s reason %q at %v", task.Status, task.FailureReason, task.FailureAt)
 	}
 }
+
+func TestDependencyBlockers(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "db.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	tr, err := New(st.DB(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	a, err := tr.Create(ctx, CreateInput{Title: "a", Status: StatusReady, Complexity: 2, CreatedBy: "user"}, "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := tr.Create(ctx, CreateInput{Title: "b", Status: StatusReady, Complexity: 2, DependsOn: []string{a.ID}, CreatedBy: "user"}, "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.Status != StatusBlocked || len(b.Blockers) == 0 || b.Blockers[0].RefID != a.ID {
+		t.Fatalf("blocked task = status %s blockers %#v", b.Status, b.Blockers)
+	}
+	for _, status := range []TaskStatus{StatusClaimed, StatusInProgress, StatusReview, StatusDone} {
+		if _, err := tr.Transition(ctx, a.ID, status, "user"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	b, err = tr.Get(ctx, b.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.Status != StatusReady {
+		t.Fatalf("dependent status = %s blockers %#v", b.Status, b.Blockers)
+	}
+}

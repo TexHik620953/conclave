@@ -156,6 +156,15 @@ and handoff. Tool logs and reasoning are intentionally not copied.
 If the parent had uncommitted changes, decomposition creates a snapshot commit
 and children use it as their base when the target repository contains it.
 
+## Task is Blocked by a dependency
+
+This is expected: the task has unfinished dependencies. Open the **Blocked by**
+link on the card/detail to jump to the blocking task or question.
+
+When all blockers are resolved the task returns to Ready automatically. If a
+dependency task is deleted or never completed, edit the task dependencies and
+save it again.
+
 ## Task shows a FAILED badge
 
 After three automatic retry attempts the task returns to **Backlog** with a

@@ -59,9 +59,19 @@ type Task struct {
 	ClaimUntil       *time.Time `json:"claim_until,omitempty"`
 	FailureReason    string     `json:"failure_reason,omitempty"`
 	FailureAt        *time.Time `json:"failure_at,omitempty"`
+	Blockers         []Blocker  `json:"blockers,omitempty"`
 	CreatedAt        time.Time  `json:"created_at"`
 	UpdatedAt        time.Time  `json:"updated_at"`
 	ReadyAt          *time.Time `json:"ready_at,omitempty"`
+}
+
+type Blocker struct {
+	TaskID     string     `json:"task_id"`
+	Kind       string     `json:"kind"`
+	RefID      string     `json:"ref_id"`
+	Reason     string     `json:"reason,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+	ResolvedAt *time.Time `json:"resolved_at,omitempty"`
 }
 
 type Comment struct {

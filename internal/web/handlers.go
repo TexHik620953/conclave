@@ -574,14 +574,28 @@ func (s *Server) configGet(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) configDefaultProfile(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Profile string `json:"profile"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpError(w, err, http.StatusBadRequest)
+		return
+	}
+	if err := config.SetGlobalDefaultProfile(req.Profile); err != nil {
+		httpError(w, err, http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.reloadResult())
+}
+
 func (s *Server) configMCP(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodDelete {
 		if err := config.DeleteGlobalMCP(r.URL.Query().Get("name")); err != nil {
 			httpError(w, err, http.StatusBadRequest)
 			return
 		}
-		s.reloadAll()
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		writeJSON(w, http.StatusOK, s.reloadResult())
 		return
 	}
 	var req struct {
@@ -603,8 +617,7 @@ func (s *Server) configMCP(w http.ResponseWriter, r *http.Request) {
 		httpError(w, err, http.StatusBadRequest)
 		return
 	}
-	s.reloadAll()
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	writeJSON(w, http.StatusOK, s.reloadResult())
 }
 
 func (s *Server) configSearch(w http.ResponseWriter, r *http.Request) {
@@ -624,8 +637,7 @@ func (s *Server) configSearch(w http.ResponseWriter, r *http.Request) {
 		httpError(w, err, http.StatusBadRequest)
 		return
 	}
-	s.reloadAll()
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	writeJSON(w, http.StatusOK, s.reloadResult())
 }
 
 func (s *Server) configProvider(w http.ResponseWriter, r *http.Request) {
@@ -634,8 +646,7 @@ func (s *Server) configProvider(w http.ResponseWriter, r *http.Request) {
 			httpError(w, err, http.StatusBadRequest)
 			return
 		}
-		s.reloadAll()
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		writeJSON(w, http.StatusOK, s.reloadResult())
 		return
 	}
 	var req struct {
@@ -655,8 +666,7 @@ func (s *Server) configProvider(w http.ResponseWriter, r *http.Request) {
 		httpError(w, err, http.StatusBadRequest)
 		return
 	}
-	s.reloadAll()
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	writeJSON(w, http.StatusOK, s.reloadResult())
 }
 
 func (s *Server) configKey(w http.ResponseWriter, r *http.Request) {
@@ -672,8 +682,7 @@ func (s *Server) configKey(w http.ResponseWriter, r *http.Request) {
 		httpError(w, err, http.StatusBadRequest)
 		return
 	}
-	s.reloadAll()
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	writeJSON(w, http.StatusOK, s.reloadResult())
 }
 
 func (s *Server) configModel(w http.ResponseWriter, r *http.Request) {
@@ -682,8 +691,7 @@ func (s *Server) configModel(w http.ResponseWriter, r *http.Request) {
 			httpError(w, err, http.StatusBadRequest)
 			return
 		}
-		s.reloadAll()
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		writeJSON(w, http.StatusOK, s.reloadResult())
 		return
 	}
 	var req struct {
@@ -709,8 +717,7 @@ func (s *Server) configModel(w http.ResponseWriter, r *http.Request) {
 		httpError(w, err, http.StatusBadRequest)
 		return
 	}
-	s.reloadAll()
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	writeJSON(w, http.StatusOK, s.reloadResult())
 }
 
 func (s *Server) configProfile(w http.ResponseWriter, r *http.Request) {
@@ -719,8 +726,7 @@ func (s *Server) configProfile(w http.ResponseWriter, r *http.Request) {
 			httpError(w, err, http.StatusBadRequest)
 			return
 		}
-		s.reloadAll()
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		writeJSON(w, http.StatusOK, s.reloadResult())
 		return
 	}
 	var req struct {
@@ -752,8 +758,7 @@ func (s *Server) configProfile(w http.ResponseWriter, r *http.Request) {
 		httpError(w, err, http.StatusBadRequest)
 		return
 	}
-	s.reloadAll()
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	writeJSON(w, http.StatusOK, s.reloadResult())
 }
 
 func (s *Server) configTest(w http.ResponseWriter, r *http.Request) {
@@ -784,20 +789,28 @@ func (s *Server) configTest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"models": models})
 }
 
-func (s *Server) reloadAll() {
+func (s *Server) reloadAll() []string {
 	s.mu.Lock()
 	list := make([]*workspace, 0, len(s.workspaces))
 	for _, ws := range s.workspaces {
 		list = append(list, ws)
 	}
 	s.mu.Unlock()
+	var warnings []string
 	for _, ws := range list {
 		if err := ws.App.ReloadConfig(); err != nil {
+			msg := fmt.Sprintf("%s: %v", ws.Path, err)
+			warnings = append(warnings, msg)
 			s.logf("config reload failed: workspace=%s error=%v", ws.Path, err)
 		} else {
 			s.logf("config reloaded: workspace=%s", ws.Path)
 		}
 	}
+	return warnings
+}
+
+func (s *Server) reloadResult() map[string]any {
+	return map[string]any{"ok": true, "warnings": s.reloadAll()}
 }
 
 func (s *Server) questionsList(w http.ResponseWriter, r *http.Request) {

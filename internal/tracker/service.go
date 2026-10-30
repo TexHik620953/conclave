@@ -10,12 +10,16 @@ import (
 	"time"
 
 	"github.com/texhik/conclave/internal/domain"
+	"github.com/texhik/conclave/internal/event"
 )
 
 type Service struct {
 	db      *sql.DB
 	project Project
+	bus     *event.Bus
 }
+
+func (s *Service) SetBus(bus *event.Bus) { s.bus = bus }
 
 func New(db *sql.DB, cwd string) (*Service, error) {
 	s := &Service{db: db}
@@ -122,6 +126,10 @@ CREATE TABLE IF NOT EXISTS task_logs (
   level TEXT NOT NULL, kind TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS task_logs_attempt ON task_logs(attempt_id,seq);
+CREATE TABLE IF NOT EXISTS task_blockers (
+  task_id TEXT NOT NULL, kind TEXT NOT NULL, ref_id TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL, resolved_at TEXT, PRIMARY KEY(task_id,kind,ref_id)
+);
 `)
 	if err != nil {
 		return err
@@ -225,12 +233,25 @@ func (s *Service) Create(ctx context.Context, in CreateInput, actor string) (*Ta
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return s.Get(ctx, id)
+	task, err := s.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if task.Status == StatusReady {
+		_ = s.RefreshDependencyBlockers(ctx, id)
+		task, _ = s.Get(ctx, id)
+	}
+	return task, nil
 }
 
 func (s *Service) Get(ctx context.Context, id string) (*Task, error) {
 	row := s.db.QueryRowContext(ctx, `SELECT `+taskColumns+` FROM tracker_tasks WHERE id=? AND project_id=?`, id, s.project.ID)
-	return scanTask(row)
+	t, err := scanTask(row)
+	if err != nil {
+		return nil, err
+	}
+	t.Blockers, _ = s.Blockers(ctx, id)
+	return t, nil
 }
 
 func (s *Service) List(ctx context.Context, f Filter) ([]Task, error) {
@@ -302,7 +323,11 @@ func (s *Service) List(ctx context.Context, f Filter) ([]Task, error) {
 		}
 		out = append(out, *t)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	s.attachBlockers(ctx, out)
+	return out, nil
 }
 
 func (s *Service) Update(ctx context.Context, id string, in CreateInput, actor string) (*Task, error) {
@@ -331,6 +356,7 @@ func (s *Service) Update(ctx context.Context, id string, in CreateInput, actor s
 		return nil, err
 	}
 	_ = s.addEvent(ctx, id, "updated", actor, "")
+	_ = s.RefreshDependencyBlockers(ctx, id)
 	return s.Get(ctx, id)
 }
 
@@ -363,6 +389,10 @@ func (s *Service) Transition(ctx context.Context, id string, to TaskStatus, acto
 		_, _ = s.db.ExecContext(ctx, `DELETE FROM tracker_claims WHERE task_id=?`, id)
 	}
 	_ = s.addEvent(ctx, id, "transition", actor, string(t.Status)+" -> "+string(to))
+	if to == StatusReady {
+		_ = s.RefreshDependencyBlockers(ctx, id)
+	}
+	s.refreshDependents(ctx, id)
 	return s.Get(ctx, id)
 }
 
@@ -584,6 +614,7 @@ func (s *Service) RecoverInterrupted(ctx context.Context, reason string) (int, e
 			s.Log(ctx, id, attemptID, "warn", "system", "Attempt interrupted: "+reason)
 		}
 		_ = s.addEvent(ctx, id, "recovered", "queue", reason)
+		_ = s.RefreshDependencyBlockers(ctx, id)
 	}
 	return len(ids), nil
 }
@@ -616,7 +647,10 @@ func (s *Service) SetDependencies(ctx context.Context, id string, deps []string,
 	if err != nil {
 		return err
 	}
-	return s.addEvent(ctx, id, "dependencies", actor, strings.Join(deps, ","))
+	if err := s.addEvent(ctx, id, "dependencies", actor, strings.Join(deps, ",")); err != nil {
+		return err
+	}
+	return s.RefreshDependencyBlockers(ctx, id)
 }
 
 func (s *Service) AssignBatch(ctx context.Context, ids []string, batchID string) error {
@@ -628,6 +662,9 @@ func (s *Service) AssignBatch(ctx context.Context, ids []string, batchID string)
 			return err
 		}
 		_ = s.addEvent(ctx, id, "batch_assigned", "conclave", batchID)
+		if err := s.RefreshDependencyBlockers(ctx, id); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -666,10 +703,14 @@ func (s *Service) FailToBacklog(ctx context.Context, id, actor, reason string) e
 func (s *Service) SetTaskStatus(ctx context.Context, id string, status TaskStatus, actor string) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE tracker_tasks SET status=?,updated_at=? WHERE id=? AND project_id=?`,
 		string(status), time.Now().Format(time.RFC3339Nano), id, s.project.ID)
-	if err == nil {
-		_ = s.addEvent(ctx, id, "transition", actor, string(status))
+	if err != nil {
+		return err
 	}
-	return err
+	_ = s.addEvent(ctx, id, "transition", actor, string(status))
+	if status == StatusReady || status == StatusBlocked {
+		return s.RefreshDependencyBlockers(ctx, id)
+	}
+	return nil
 }
 
 func (s *Service) StartAttempt(ctx context.Context, taskID string, attemptNo int, agentID, worker, model string) (*Attempt, error) {
@@ -816,6 +857,148 @@ func insertEventTx(ctx context.Context, tx *sql.Tx, taskID, typ, actor, data str
 	_, err := tx.ExecContext(ctx, `INSERT INTO tracker_events(id,task_id,type,actor,data,created_at) VALUES(?,?,?,?,?,?)`,
 		domain.NewID("evt"), taskID, typ, actor, data, time.Now().Format(time.RFC3339Nano))
 	return err
+}
+
+func (s *Service) Blockers(ctx context.Context, taskID string) ([]Blocker, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT task_id,kind,ref_id,reason,created_at,resolved_at FROM task_blockers WHERE task_id=? ORDER BY created_at`, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Blocker
+	for rows.Next() {
+		var b Blocker
+		var created string
+		var resolved sql.NullString
+		if err := rows.Scan(&b.TaskID, &b.Kind, &b.RefID, &b.Reason, &created, &resolved); err != nil {
+			return nil, err
+		}
+		b.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
+		if resolved.Valid {
+			v, _ := time.Parse(time.RFC3339Nano, resolved.String)
+			b.ResolvedAt = &v
+		}
+		out = append(out, b)
+	}
+	return out, rows.Err()
+}
+
+func (s *Service) attachBlockers(ctx context.Context, tasks []Task) {
+	if len(tasks) == 0 {
+		return
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT task_id,kind,ref_id,reason,created_at FROM task_blockers WHERE resolved_at IS NULL ORDER BY created_at`)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	byTask := map[string][]Blocker{}
+	for rows.Next() {
+		var b Blocker
+		var created string
+		if rows.Scan(&b.TaskID, &b.Kind, &b.RefID, &b.Reason, &created) == nil {
+			b.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
+			byTask[b.TaskID] = append(byTask[b.TaskID], b)
+		}
+	}
+	for i := range tasks {
+		tasks[i].Blockers = byTask[tasks[i].ID]
+	}
+}
+
+// RefreshDependencyBlockers reconciles dependency blockers for one task. Tasks
+// waiting on unfinished dependencies are moved to Blocked; when all blockers
+// are resolved the task returns to Ready.
+func (s *Service) RefreshDependencyBlockers(ctx context.Context, taskID string) error {
+	t, err := s.Get(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	now := time.Now().Format(time.RFC3339Nano)
+	var dependencyBlockers int
+	_ = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM task_blockers WHERE task_id=? AND kind='dependency' AND resolved_at IS NULL`, taskID).Scan(&dependencyBlockers)
+	deps := map[string]bool{}
+	for _, dep := range t.DependsOn {
+		deps[dep] = true
+		depTask, err := s.Get(ctx, dep)
+		if err == nil && depTask.Status == StatusDone {
+			_, _ = s.db.ExecContext(ctx, `UPDATE task_blockers SET resolved_at=? WHERE task_id=? AND kind='dependency' AND ref_id=? AND resolved_at IS NULL`, now, taskID, dep)
+			continue
+		}
+		reason := "waiting for dependency " + dep
+		if err == nil && depTask != nil {
+			reason = "waiting for " + dep + ": " + depTask.Title
+		}
+		_, _ = s.db.ExecContext(ctx, `INSERT INTO task_blockers(task_id,kind,ref_id,reason,created_at) VALUES(?, 'dependency', ?, ?, ?)
+			ON CONFLICT(task_id,kind,ref_id) DO UPDATE SET reason=excluded.reason,resolved_at=NULL`, taskID, dep, reason, now)
+	}
+	// Remove dependency blockers for dependencies that were removed from the task.
+	rows, _ := s.db.QueryContext(ctx, `SELECT ref_id FROM task_blockers WHERE task_id=? AND kind='dependency' AND resolved_at IS NULL`, taskID)
+	if rows != nil {
+		var stale []string
+		for rows.Next() {
+			var ref string
+			if rows.Scan(&ref) == nil && !deps[ref] {
+				stale = append(stale, ref)
+			}
+		}
+		rows.Close()
+		for _, ref := range stale {
+			_, _ = s.db.ExecContext(ctx, `DELETE FROM task_blockers WHERE task_id=? AND kind='dependency' AND ref_id=?`, taskID, ref)
+		}
+	}
+	var unresolved int
+	_ = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM task_blockers WHERE task_id=? AND resolved_at IS NULL`, taskID).Scan(&unresolved)
+	if unresolved > 0 {
+		if t.Status == StatusReady {
+			_, _ = s.db.ExecContext(ctx, `UPDATE tracker_tasks SET status=?,assignee='',claim_owner='',claim_until=NULL,updated_at=? WHERE id=? AND project_id=?`, string(StatusBlocked), now, taskID, s.project.ID)
+			_, _ = s.db.ExecContext(ctx, `DELETE FROM tracker_claims WHERE task_id=?`, taskID)
+			_ = s.addEvent(ctx, taskID, "blocked", "queue", "waiting for dependencies")
+			s.publishBoard("task blocked by dependency: " + taskID)
+		}
+	} else if t.Status == StatusBlocked && (len(t.DependsOn) > 0 || dependencyBlockers > 0) {
+		_, _ = s.db.ExecContext(ctx, `UPDATE tracker_tasks SET status=?,updated_at=? WHERE id=? AND project_id=?`, string(StatusReady), now, taskID, s.project.ID)
+		_ = s.addEvent(ctx, taskID, "unblocked", "queue", "dependencies satisfied")
+		s.publishBoard("task unblocked: " + taskID)
+	}
+	return nil
+}
+
+func (s *Service) RefreshAllDependencyBlockers(ctx context.Context) error {
+	tasks, err := s.List(ctx, Filter{Limit: 1000})
+	if err != nil {
+		return err
+	}
+	for _, t := range tasks {
+		if t.Status == StatusReady || t.Status == StatusBlocked {
+			if err := s.RefreshDependencyBlockers(ctx, t.ID); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (s *Service) refreshDependents(ctx context.Context, taskID string) {
+	tasks, err := s.List(ctx, Filter{Limit: 1000})
+	if err != nil {
+		return
+	}
+	for _, t := range tasks {
+		for _, dep := range t.DependsOn {
+			if dep == taskID {
+				_ = s.RefreshDependencyBlockers(ctx, t.ID)
+				break
+			}
+		}
+	}
+}
+
+func (s *Service) publishBoard(text string) {
+	if s.bus == nil {
+		return
+	}
+	s.bus.Publish(domain.Event{Type: "board.changed", Text: text, Time: time.Now()})
 }
 
 const taskColumns = `id,project_id,number,title,description,context,requirements,constraints,verification,out_of_scope,complexity,complexity_reason,priority,status,component,labels,epic,kind,parent_id,depends_on,write_scope,acceptance,created_by,origin_session_id,assignee,run_id,batch_id,attempts,branch,base_commit,commit_hash,claim_owner,claim_until,failure_reason,failure_at,created_at,updated_at,ready_at`

@@ -134,6 +134,11 @@ any non-terminal state → cancelled
 Only `ready` tasks are eligible for the queue. Claims use leases and heartbeats;
 interrupted claims return to the queue through recovery.
 
+Dependencies are represented as unresolved `task_blockers` with
+`kind=dependency`. A task with unfinished dependencies is moved to **Blocked**.
+Finishing the dependency resolves the blocker and moves the dependent task back
+to **Ready**. Question blockers use the same table with `kind=question`.
+
 ## Conclave planning
 
 The master is a normal agent with a restricted set of tools:

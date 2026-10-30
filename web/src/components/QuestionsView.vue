@@ -16,8 +16,16 @@ const columns = [
   { key: 'answered_ai', label: 'Answered by AI', hint: 'resolved automatically' },
 ]
 
-onMounted(load)
+onMounted(async () => { await load(); focusRequested() })
 watch(() => store.counters.questions, load)
+watch(() => store.openQuestionId, focusRequested)
+function focusRequested() {
+  const id = store.openQuestionId
+  if (!id) return
+  store.openQuestionId = ''
+  if (!sets.value.some(s => s.id === id)) return
+  if (open.value !== id) toggleSet(id)
+}
 
 async function load() {
   loading.value = true

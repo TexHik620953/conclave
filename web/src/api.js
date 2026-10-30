@@ -10,6 +10,9 @@ async function request(path, options = {}) {
     const msg = data && data.error ? data.error : (text || res.statusText)
     throw new Error(msg)
   }
+  if (data && Array.isArray(data.warnings) && data.warnings.length) {
+    window.dispatchEvent(new CustomEvent('conclave-config-warning', { detail: data.warnings }))
+  }
   return data
 }
 
@@ -27,6 +30,7 @@ export const api = {
   setKey: (provider, apiKey) => request('/api/config/key', { method: 'POST', body: JSON.stringify({ provider, api_key: apiKey }) }),
   saveModel: (payload) => request('/api/config/model', { method: 'POST', body: JSON.stringify(payload) }),
   saveProfile: (name, profile) => request('/api/config/profile', { method: 'POST', body: JSON.stringify({ name, profile }) }),
+  setDefaultProfile: (profile) => request('/api/config/default-profile', { method: 'POST', body: JSON.stringify({ profile }) }),
   deleteProfile: (name) => request('/api/config/profile?name=' + encodeURIComponent(name), { method: 'DELETE' }),
   saveMCP: (payload) => request('/api/config/mcp', { method: 'POST', body: JSON.stringify(payload) }),
   deleteMCP: (name) => request('/api/config/mcp?name=' + encodeURIComponent(name), { method: 'DELETE' }),

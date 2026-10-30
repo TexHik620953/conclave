@@ -592,3 +592,23 @@ func SetWorkspaceProfile(cwd, name string) error {
 	}
 	return writeProjectDoc(path, doc)
 }
+
+func SetGlobalDefaultProfile(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("profile name is required")
+	}
+	cfg, err := LoadGlobalOnly()
+	if err != nil {
+		return err
+	}
+	if _, ok := cfg.Profiles[name]; !ok {
+		return fmt.Errorf("profile %q not found", name)
+	}
+	doc, path, err := readGlobalDoc()
+	if err != nil {
+		return err
+	}
+	doc["default_profile"] = name
+	return writeGlobalDoc(doc, path)
+}

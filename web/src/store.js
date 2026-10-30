@@ -16,6 +16,7 @@ export const store = reactive({
   view: 'chat',
   configTab: 'providers',
   openTaskId: '',
+  openQuestionId: '',
   chat: [],
   ledger: { by_model: {}, by_agent: {} },
   busy: false,
