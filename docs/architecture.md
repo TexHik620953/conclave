@@ -146,6 +146,17 @@ ask_user, list_workers
 
 It cannot write files or run shell commands.
 
+Workers may also call `request_decomposition`. Child tasks:
+
+- inherit parent component, labels, epic, requirements, constraints,
+  verification and out-of-scope fields;
+- receive parent description, acceptance references, decomposition reason and
+  handoff in their context;
+- inherit the parent run/batch and are included in Conclave review;
+- start from a snapshot commit of the parent worktree when files have already
+  changed;
+- cannot request nested decomposition.
+
 `submit_plan` validates:
 
 - unique task IDs;

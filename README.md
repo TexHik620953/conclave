@@ -38,6 +38,9 @@ is stored locally under `.conclave/`.
 - Task attempts, execution logs, comments, branches and commits.
 - Review workflow: `Backlog → Ready → In Progress → Review → Done`.
 - Failed/paused work keeps a checkpoint and can continue from the same worktree.
+- Workers may request decomposition: child tasks inherit parent constraints,
+  acceptance references and a structured handoff, and start from a parent
+  snapshot when the parent already changed files.
 - Automatic worker retries (3 by default).
 - After retries are exhausted the task returns to **Backlog** with a small **FAILED** badge and preserved checkpoint.
 - Moving that task back to Ready resumes from the checkpoint.

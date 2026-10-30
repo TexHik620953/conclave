@@ -147,6 +147,15 @@ state.
 If both the worktree and checkpoint are removed, the task cannot resume and will
 start a new attempt.
 
+## Child task context
+
+A decomposed child task includes the parent title/description, requirements,
+constraints, verification, out-of-scope fields, acceptance references, reason
+and handoff. Tool logs and reasoning are intentionally not copied.
+
+If the parent had uncommitted changes, decomposition creates a snapshot commit
+and children use it as their base when the target repository contains it.
+
 ## Task shows a FAILED badge
 
 After three automatic retry attempts the task returns to **Backlog** with a

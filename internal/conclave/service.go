@@ -756,6 +756,27 @@ func (s *Service) watchBatch(ctx context.Context) {
 			s.fail("read batch: " + err.Error())
 			return
 		}
+		// Decomposed child tasks inherit the parent batch. Include them in the
+		// run model so the master review sees their results and finish_run can
+		// close them like regular pool tasks.
+		s.mu.Lock()
+		known := map[string]bool{}
+		for _, t := range s.run.Tasks {
+			if t.BoardID != "" {
+				known[t.BoardID] = true
+			}
+		}
+		for _, bt := range tasks {
+			if known[bt.ID] {
+				continue
+			}
+			s.run.Tasks = append(s.run.Tasks, domain.Task{
+				ID: bt.ID, BoardID: bt.ID, Title: bt.Title, Spec: bt.Description,
+				Complexity: bt.Complexity, Priority: bt.Priority, Kind: bt.Kind,
+				Status: domain.TaskPending,
+			})
+		}
+		s.mu.Unlock()
 		terminal := len(tasks) > 0
 		hasWork := false
 		for _, t := range tasks {
@@ -794,6 +815,10 @@ func (s *Service) watchBatch(ctx context.Context) {
 				s.run.Tasks[i].Status = domain.TaskReview
 			case tracker.StatusBlocked:
 				s.run.Tasks[i].Status = domain.TaskFailed
+			case tracker.StatusBacklog:
+				if bt.FailureReason != "" {
+					s.run.Tasks[i].Status = domain.TaskFailed
+				}
 			case tracker.StatusCancelled:
 				s.run.Tasks[i].Status = domain.TaskCanceled
 			}

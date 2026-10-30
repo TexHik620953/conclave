@@ -249,10 +249,14 @@ func (r *Runner) execute(ctx context.Context, task tracker.Task, w config.Worker
 		r.deps.Tracker.AddComment(context.Background(), task.ID, "queue", "resuming existing worktree "+dir)
 		r.publish("board.changed", "task resumed: "+task.ID)
 	} else {
-		base, err = repo.Snapshot(ctx)
-		if err != nil {
-			r.fail(ctx, task.ID, w.ID, err)
-			return
+		if task.BaseCommit != "" && repo.HasCommit(ctx, task.BaseCommit) {
+			base = task.BaseCommit
+		} else {
+			base, err = repo.Snapshot(ctx)
+			if err != nil {
+				r.fail(ctx, task.ID, w.ID, err)
+				return
+			}
 		}
 		branch = fmt.Sprintf("conclave/board/%s-a%d", task.ID, task.Attempts)
 		dir = filepath.Join(boardDir, fmt.Sprintf("%s-a%d", task.ID, task.Attempts))

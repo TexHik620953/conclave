@@ -304,3 +304,8 @@ func (r Repo) CurrentBranch(ctx context.Context) (string, error) {
 	out, err := r.git(ctx, "rev-parse", "--abbrev-ref", "HEAD")
 	return strings.TrimSpace(out), err
 }
+
+func (r Repo) HasCommit(ctx context.Context, hash string) bool {
+	_, err := r.git(ctx, "cat-file", "-e", hash+"^{commit}")
+	return err == nil
+}

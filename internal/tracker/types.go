@@ -53,6 +53,7 @@ type Task struct {
 	BatchID          string     `json:"batch_id,omitempty"`
 	Attempts         int        `json:"attempts"`
 	Branch           string     `json:"branch,omitempty"`
+	BaseCommit       string     `json:"base_commit,omitempty"`
 	Commit           string     `json:"commit,omitempty"`
 	ClaimOwner       string     `json:"claim_owner,omitempty"`
 	ClaimUntil       *time.Time `json:"claim_until,omitempty"`
@@ -124,6 +125,9 @@ type CreateInput struct {
 	CreatedBy        string
 	OriginSessionID  string
 	Assignee         string
+	RunID            string
+	BatchID          string
+	BaseCommit       string
 }
 
 type WorkerSlot struct {
