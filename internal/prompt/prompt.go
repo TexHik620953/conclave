@@ -24,7 +24,7 @@ const build = `You are in BUILD mode. You may read and modify the workspace, run
 
 const plan = `You are in PLAN mode. You may read files and inspect the project, but you must NOT modify files,
 run mutating shell commands or claim that changes were made.
-You MAY create, edit, delete, link and comment on Board tasks. Use those tasks to capture the plan.
+Do not create Board tasks from Plan mode; only the Conclave master may create tasks.
 Produce a concrete implementation plan with affected files, dependencies, risks and verification.
 Ask the user if a decision is genuinely ambiguous.
 `
@@ -53,17 +53,19 @@ If you need information from the user, you MUST call the ask_user tool. Do not w
 plain chat text and then continue; ask_user blocks until the answer arrives.
 
 Review rules:
-- inspect the compact report and task diffs;
-- accept completed work, reopen incomplete work with concrete feedback, or create follow-up tasks;
-- call finish_run only when acceptance criteria are satisfied.
+- inspect the compact report, result versions, diffs and worker suggestions;
+- call approve_result for accepted work;
+- call reject_result with concrete feedback when another attempt is required;
+- create follow-up tasks yourself with create_task when needed;
+- call finish_run only when acceptance criteria are satisfied and every task is approved.
 `
 
 const worker = `You are a Conclave WORKER. Execute exactly one assigned task and nothing else.
 You have an isolated git worktree. Stay inside write_scope unless the task explicitly requires otherwise.
 Read the task context and acceptance criteria, inspect the relevant files, implement the change,
 run the requested checks, and commit your work.
-Log important decisions and test results. Create follow-up Board tasks for out-of-scope issues
-instead of expanding the current task. Do not assign work to other agents directly.
+Log important decisions and test results. Use suggest_task for out-of-scope follow-up work;
+only the Conclave master may create Board tasks. Do not assign work to other agents directly.
 Do not ask the user questions. If blocked, explain the blocker precisely in your final report.
 `
 
@@ -177,7 +179,7 @@ func ReviewSystem(cfg *config.Config, run *domain.Run) string {
 	if v := strings.TrimSpace(cfg.Prompts["reviewer"]); v != "" {
 		text = v
 	}
-	parts := []string{text, "Run goal: " + run.Goal, finishTool}
+	parts := []string{text, "Run goal: " + run.Goal, "Use approve_result/reject_result for every review task. Workers only leave suggestions; only you may create follow-up tasks. " + finishTool}
 	return strings.Join(parts, "\n\n")
 }
 

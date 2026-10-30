@@ -39,8 +39,11 @@ is stored locally under `.conclave/`.
 - Worker selection by complexity range and provider concurrency limits.
 - Task attempts, execution logs, comments, branches and commits.
 - Review workflow: `Backlog → Ready → In Progress → Review → Done`.
-- Result versions for review: every worker attempt records its final result;
-  approve or reject the latest version without digging through execution logs.
+- Result versions for review: every worker attempt records its final result.
+- The Conclave master reviews result versions and calls `approve_result` or
+  `reject_result`; humans normally only answer agent questions.
+- Workers cannot create tasks. They use `suggest_task`, and the master decides
+  whether to create follow-up work.
 - Failed/paused work keeps a checkpoint and can continue from the same worktree.
 - Workers may request decomposition: child tasks inherit parent constraints,
   acceptance references and a structured handoff, and start from a parent

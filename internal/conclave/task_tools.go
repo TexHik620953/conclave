@@ -136,10 +136,54 @@ func (t commentTaskTool) Run(ctx context.Context, env tools.Env, args json.RawMe
 
 func TaskTools(tr *tracker.Service) []tools.Tool {
 	return []tools.Tool{
-		createTaskTool{tr: tr},
+		suggestTaskTool{tr: tr},
 		listTasksTool{tr: tr},
 		commentTaskTool{tr: tr},
 	}
+}
+
+type suggestTaskTool struct{ tr *tracker.Service }
+
+func (t suggestTaskTool) Name() string { return "suggest_task" }
+func (t suggestTaskTool) Spec() llm.Tool {
+	return llm.Tool{Name: "suggest_task", Description: "Record a follow-up task suggestion for master review. This does not create or dispatch a task.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"title":       map[string]any{"type": "string"},
+				"description": map[string]any{"type": "string"},
+				"context":     map[string]any{"type": "string", "description": "Why it matters, files and constraints"},
+				"complexity":  map[string]any{"type": "integer", "minimum": 1, "maximum": 5},
+				"priority":    map[string]any{"type": "integer", "minimum": 1, "maximum": 5},
+				"acceptance":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			},
+			"required": []string{"title", "description", "complexity", "priority"},
+		}}
+}
+func (t suggestTaskTool) Run(ctx context.Context, env tools.Env, args json.RawMessage) (string, error) {
+	if t.tr == nil || env.TaskID == "" {
+		return "", fmt.Errorf("task suggestion requires an active task")
+	}
+	var in struct {
+		Title       string   `json:"title"`
+		Description string   `json:"description"`
+		Context     string   `json:"context"`
+		Complexity  int      `json:"complexity"`
+		Priority    int      `json:"priority"`
+		Acceptance  []string `json:"acceptance"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "SUGGESTION\nTitle: %s\nDescription: %s\nContext: %s\nComplexity: %d\nPriority: %d\n", in.Title, in.Description, in.Context, in.Complexity, in.Priority)
+	for _, a := range in.Acceptance {
+		fmt.Fprintf(&b, "Acceptance: %s\n", a)
+	}
+	if _, err := t.tr.AddComment(ctx, env.TaskID, env.AgentID, b.String()); err != nil {
+		return "", err
+	}
+	return "Suggestion recorded for master review; no task was created.", nil
 }
 
 func actor(env tools.Env) string {
@@ -164,4 +208,52 @@ func (t listWorkersTool) Run(ctx context.Context, env tools.Env, args json.RawMe
 		return "no worker profiles", nil
 	}
 	return b.String(), nil
+}
+
+type approveResultTool struct{ svc *Service }
+
+func (t approveResultTool) Name() string { return "approve_result" }
+func (t approveResultTool) Spec() llm.Tool {
+	return llm.Tool{Name: "approve_result", Description: "Approve a reviewed task result and move the task to Done.",
+		Parameters: map[string]any{"type": "object", "properties": map[string]any{
+			"task_id":  map[string]any{"type": "string", "description": "Board task ID"},
+			"feedback": map[string]any{"type": "string"},
+		}, "required": []string{"task_id"}}}
+}
+func (t approveResultTool) Run(ctx context.Context, env tools.Env, args json.RawMessage) (string, error) {
+	var in struct {
+		TaskID   string `json:"task_id"`
+		Feedback string `json:"feedback"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return "", err
+	}
+	if err := t.svc.approveBoardTask(ctx, in.TaskID, actor(env), in.Feedback); err != nil {
+		return "", err
+	}
+	return "Approved " + in.TaskID + ".", nil
+}
+
+type rejectResultTool struct{ svc *Service }
+
+func (t rejectResultTool) Name() string { return "reject_result" }
+func (t rejectResultTool) Spec() llm.Tool {
+	return llm.Tool{Name: "reject_result", Description: "Reject a reviewed task result, leave concrete feedback and return the task to Ready for another attempt.",
+		Parameters: map[string]any{"type": "object", "properties": map[string]any{
+			"task_id":  map[string]any{"type": "string", "description": "Board task ID"},
+			"feedback": map[string]any{"type": "string", "description": "What must be fixed in the next attempt"},
+		}, "required": []string{"task_id", "feedback"}}}
+}
+func (t rejectResultTool) Run(ctx context.Context, env tools.Env, args json.RawMessage) (string, error) {
+	var in struct {
+		TaskID   string `json:"task_id"`
+		Feedback string `json:"feedback"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return "", err
+	}
+	if err := t.svc.rejectBoardTask(ctx, in.TaskID, actor(env), in.Feedback); err != nil {
+		return "", err
+	}
+	return "Rejected " + in.TaskID + "; task returned to Ready.", nil
 }

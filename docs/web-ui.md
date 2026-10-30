@@ -157,6 +157,10 @@ answered or deleted.
 The task detail modal has a **Result** tab. Each successful worker attempt
 creates a result version containing the final assistant report.
 
+The Conclave master normally approves or rejects results automatically.
+
+The same actions remain available manually:
+
 - **Approve** marks the latest result `approved` and moves the task to Done.
 - **Reject** marks it `rejected` and returns the task to Ready.
 - A later attempt creates a new version; previous versions stay visible.

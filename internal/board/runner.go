@@ -429,7 +429,6 @@ func boardTools(tr *tracker.Service, qsvc *questions.Service, searchCfg config.S
 	for _, tool := range conclave.TaskTools(tr) {
 		reg.Add(tool)
 	}
-	reg.Add(requestDecompositionTool{tr: tr})
 	if qsvc != nil {
 		reg.Add(questions.AskTool{Svc: qsvc, Autonomous: true})
 	}

@@ -521,11 +521,6 @@ func (a *App) send(ctx context.Context, text string, appendUser bool) error {
 		}
 	}
 	tools.AddWebSearch(reg, a.cfg.Search)
-	if a.track != nil {
-		for _, t := range conclave.TaskTools(a.track) {
-			reg.Add(t)
-		}
-	}
 	if a.questions != nil {
 		reg.Add(questions.AskTool{Svc: a.questions})
 	}

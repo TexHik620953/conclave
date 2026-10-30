@@ -151,7 +151,23 @@ ask_user, list_workers
 
 It cannot write files or run shell commands.
 
-Workers may also call `request_decomposition`. Child tasks:
+Workers cannot create tasks directly. They can call `suggest_task`, which records
+a structured suggestion on the current task. The master sees those suggestions
+during review and decides whether to create follow-up tasks.
+
+Master review calls:
+
+- `approve_result` for accepted work;
+- `reject_result` with feedback to return a task to Ready;
+- `create_task` only when the master decides follow-up work is needed;
+- `finish_run` only after all review tasks are decided.
+
+When a new task pool is submitted, previous Review tasks are approved and moved
+to Done before only the new pending tasks are dispatched. This prevents completed
+tasks from being reopened in the next iteration.
+
+Legacy decomposition implementation remains in the codebase for reference, but
+it is not registered as a worker tool. Child tasks:
 
 - inherit parent component, labels, epic, requirements, constraints,
   verification and out-of-scope fields;

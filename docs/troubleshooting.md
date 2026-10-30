@@ -179,6 +179,18 @@ If a task still hits `maximum steps`, inspect its execution logs:
 
 A retried task resumes from its checkpoint with a fresh step budget.
 
+## Tasks accumulate and none reach Done
+
+- Workers no longer create tasks directly; they only record `suggest_task`
+  suggestions.
+- The master reviews result versions and approves or rejects them.
+- A new Conclave task pool closes previous Review tasks before dispatching only
+  the new pending tasks.
+- If the run failed before master review, fix the run error (for example provider
+  auth) and retry the review.
+
+Check **Result** on review tasks and the Conclave run phase.
+
 ## Task shows a FAILED badge
 
 After three automatic retry attempts the task returns to **Backlog** with a

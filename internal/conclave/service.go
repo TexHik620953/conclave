@@ -657,6 +657,9 @@ func (s *Service) canFinish() error {
 		if t.Status == domain.TaskFailed || t.Status == domain.TaskCanceled {
 			return fmt.Errorf("cannot finish: task %s is %s", t.ID, t.Status)
 		}
+		if t.Status == domain.TaskPending || t.Status == domain.TaskRunning || t.Status == domain.TaskQueued {
+			return fmt.Errorf("cannot finish: task %s is still %s; approve/reject it first", t.ID, t.Status)
+		}
 	}
 	if researchGoal && !hasResearch {
 		return fmt.Errorf("research goal requires at least one research task assigned to the researcher profile; add research tasks before finish_run")
@@ -854,18 +857,43 @@ func (s *Service) watchBatch(ctx context.Context) {
 			s.save()
 			return
 		}
+		s.approveReviewTasks(context.Background())
 		s.mu.Lock()
 		s.run.Iteration++
 		s.run.Phase = domain.RunRunning
 		ids := make([]string, 0, len(s.run.Tasks))
 		for _, t := range s.run.Tasks {
-			if t.BoardID != "" {
+			if t.BoardID != "" && (t.Status == domain.TaskPending || t.Status == domain.TaskBlocked) {
 				ids = append(ids, t.BoardID)
 			}
 		}
 		s.mu.Unlock()
 		_ = s.tasks.AssignBatch(context.Background(), ids, runID)
 		_ = s.startQueue(context.Background())
+	}
+}
+
+func (s *Service) approveReviewTasks(ctx context.Context) {
+	s.mu.Lock()
+	tasks := append([]domain.Task(nil), s.run.Tasks...)
+	s.mu.Unlock()
+	if s.tasks == nil {
+		return
+	}
+	for i := range tasks {
+		t := &tasks[i]
+		if t.BoardID == "" || t.Status != domain.TaskReview {
+			continue
+		}
+		if _, err := s.tasks.Transition(ctx, t.BoardID, tracker.StatusDone, "master-review"); err == nil {
+			s.mu.Lock()
+			for j := range s.run.Tasks {
+				if s.run.Tasks[j].BoardID == t.BoardID {
+					s.run.Tasks[j].Status = domain.TaskDone
+				}
+			}
+			s.mu.Unlock()
+		}
 	}
 }
 
@@ -1190,7 +1218,7 @@ func (s *Service) runTask(ctx context.Context, repo gitx.Repo, task domain.Task,
 		s.jobs.AddTo(reg)
 	}
 	if s.tasks != nil {
-		reg.Add(createTaskTool{tr: s.tasks})
+		reg.Add(suggestTaskTool{tr: s.tasks})
 		reg.Add(listTasksTool{tr: s.tasks})
 		reg.Add(commentTaskTool{tr: s.tasks})
 	}
@@ -1316,10 +1344,10 @@ func (s *Service) applyOutcome(ctx context.Context, repo gitx.Repo, out struct {
 func (s *Service) reviewWithMaster(ctx context.Context) error {
 	s.mu.Lock()
 	s.run.Phase = domain.RunReviewing
-	report := buildReport(s.run)
 	runID := s.run.ID
 	masterRef := s.MasterModel()
 	s.mu.Unlock()
+	report := s.buildReviewReport(ctx)
 	s.save()
 	s.publish("run.phase_changed", "", map[string]any{"phase": domain.RunReviewing, "run_id": runID})
 
@@ -1335,6 +1363,8 @@ func (s *Service) reviewWithMaster(ctx context.Context) error {
 		reg.Add(createTaskTool{tr: s.tasks})
 		reg.Add(listTasksTool{tr: s.tasks})
 		reg.Add(commentTaskTool{tr: s.tasks})
+		reg.Add(approveResultTool{svc: s})
+		reg.Add(rejectResultTool{svc: s})
 	}
 	reg.Add(listWorkersTool{profile: s.profile})
 	if s.questions != nil {
@@ -1360,8 +1390,10 @@ func (s *Service) reviewWithMaster(ctx context.Context) error {
 	})
 	res, err := rt.Run(ctx, []domain.Message{{
 		ID: domain.NewID("msg"), Role: domain.RoleUser, CreatedAt: time.Now(),
-		Content: report + "\n\nReview the result. If work remains, call submit_plan with the next isolated task pool. " +
-			"If the goal and acceptance criteria are met, call finish_run with a concise final summary.",
+		Content: report + "\n\nReview every task whose status is review. Call approve_result for accepted work and " +
+			"reject_result with concrete feedback for work that needs another attempt. Workers may only leave suggestions; " +
+			"if a follow-up is needed, create it yourself with create_task after reviewing. If work remains, call submit_plan " +
+			"with the next isolated task pool. If the goal and acceptance criteria are met, call finish_run with a concise final summary.",
 	}})
 	s.mu.Lock()
 	if !streamed {
@@ -1376,6 +1408,85 @@ func (s *Service) reviewWithMaster(ctx context.Context) error {
 	s.persistMessages()
 	s.save()
 	return err
+}
+
+func (s *Service) buildReviewReport(ctx context.Context) string {
+	s.mu.Lock()
+	run := cloneRun(s.run)
+	s.mu.Unlock()
+	var b strings.Builder
+	fmt.Fprintf(&b, "Goal: %s\n", run.Goal)
+	if run.Plan != nil && len(run.Plan.Acceptance) > 0 {
+		fmt.Fprintf(&b, "Acceptance: %s\n", strings.Join(run.Plan.Acceptance, "; "))
+	}
+	b.WriteString("\nTasks:\n")
+	for _, t := range run.Tasks {
+		fmt.Fprintf(&b, "- [%s] board=%s %s (%s) commit=%s error=%s\n", t.Status, t.BoardID, t.ID+": "+t.Title, t.WorkerID, short(t.Commit, 8), t.Error)
+		if t.Summary != "" {
+			fmt.Fprintf(&b, "  summary: %s\n", clipText(t.Summary, 1200))
+		}
+		if t.Branch != "" {
+			fmt.Fprintf(&b, "  branch: %s\n", t.Branch)
+		}
+		if s.tasks == nil || t.BoardID == "" {
+			continue
+		}
+		if results, err := s.tasks.Results(ctx, t.BoardID); err == nil && len(results) > 0 {
+			latest := results[0]
+			fmt.Fprintf(&b, "  result v%d (%s): %s\n", len(results), latest.Verdict, clipText(latest.Content, 2500))
+		}
+		if comments, err := s.tasks.Comments(ctx, t.BoardID); err == nil {
+			for _, c := range comments {
+				if strings.HasPrefix(c.Body, "SUGGESTION") {
+					fmt.Fprintf(&b, "  worker suggestion: %s\n", clipText(c.Body, 1200))
+				}
+			}
+		}
+	}
+	return b.String()
+}
+
+func (s *Service) approveBoardTask(ctx context.Context, boardID, actor, feedback string) error {
+	if s.tasks == nil {
+		return fmt.Errorf("task tracker unavailable")
+	}
+	if strings.TrimSpace(feedback) != "" {
+		_, _ = s.tasks.AddComment(ctx, boardID, actor, feedback)
+	}
+	if _, err := s.tasks.Transition(ctx, boardID, tracker.StatusDone, actor); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	for i := range s.run.Tasks {
+		if s.run.Tasks[i].BoardID == boardID {
+			s.run.Tasks[i].Status = domain.TaskDone
+		}
+	}
+	s.mu.Unlock()
+	s.save()
+	return nil
+}
+
+func (s *Service) rejectBoardTask(ctx context.Context, boardID, actor, feedback string) error {
+	if s.tasks == nil {
+		return fmt.Errorf("task tracker unavailable")
+	}
+	if strings.TrimSpace(feedback) != "" {
+		_, _ = s.tasks.AddComment(ctx, boardID, actor, feedback)
+	}
+	if _, err := s.tasks.Transition(ctx, boardID, tracker.StatusReady, actor); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	for i := range s.run.Tasks {
+		if s.run.Tasks[i].BoardID == boardID {
+			s.run.Tasks[i].Status = domain.TaskPending
+		}
+	}
+	s.newPool = true
+	s.mu.Unlock()
+	s.save()
+	return nil
 }
 
 func buildReport(run *domain.Run) string {
