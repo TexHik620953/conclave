@@ -48,6 +48,7 @@ export const api = {
   continueChat: (id) => request('/api/chat/continue', { method: 'POST', body: JSON.stringify({ id }) }),
   setMode: (id, mode) => request('/api/mode', { method: 'POST', body: JSON.stringify({ id, mode }) }),
   setModel: (id, model) => request('/api/model', { method: 'POST', body: JSON.stringify({ id, model }) }),
+  setProfile: (id, profile) => request('/api/profile', { method: 'POST', body: JSON.stringify({ id, profile }) }),
   setModelRef: (id, provider, value) => request('/api/model', { method: 'POST', body: JSON.stringify({ id, provider, value }) }),
   setEffort: (id, effort) => request('/api/effort', { method: 'POST', body: JSON.stringify({ id, effort }) }),
   setPlanOnly: (id, value) => request('/api/plan-only', { method: 'POST', body: JSON.stringify({ id, plan_only: value }) }),

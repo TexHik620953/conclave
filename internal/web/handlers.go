@@ -39,6 +39,7 @@ type postReq struct {
 	Path      string          `json:"path"`
 	Create    bool            `json:"create"`
 	Provider  string          `json:"provider"`
+	Profile   string          `json:"profile"`
 	BaseURL   string          `json:"base_url"`
 	APIKey    string          `json:"api_key"`
 	Task      taskInput       `json:"task"`
@@ -185,6 +186,7 @@ func (s *Server) statePayload(ws *workspace) map[string]any {
 		"workspace": map[string]any{"id": ws.ID, "path": ws.Path, "project": project},
 		"state":     st, "models": models, "providers": ws.App.Providers(),
 		"sessions": sessions, "profile": ws.App.ProfileConfig(),
+		"profile_name": ws.App.ProfileName(), "profiles": ws.App.ProfileNames(),
 	}
 	if st.Session.Mode == domain.ModeConclave {
 		p["conclave"] = ws.App.Conclave().Snapshot()
@@ -339,6 +341,18 @@ func (s *Server) mode(w http.ResponseWriter, r *http.Request) {
 	}
 	if planAlias {
 		_ = ws.App.SetPlanOnly(true)
+	}
+	writeJSON(w, http.StatusOK, s.statePayload(ws))
+}
+
+func (s *Server) profile(w http.ResponseWriter, r *http.Request) {
+	ws, req, ok := s.postWorkspace(w, r)
+	if !ok {
+		return
+	}
+	if err := ws.App.SetProfile(req.Profile); err != nil {
+		httpError(w, err, http.StatusBadRequest)
+		return
 	}
 	writeJSON(w, http.StatusOK, s.statePayload(ws))
 }

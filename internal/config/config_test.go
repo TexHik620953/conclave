@@ -58,3 +58,10 @@ func TestCycleRejectedByPlanValidation(t *testing.T) {
 	}
 	_ = os.Remove(filepath.Join(dir, ".conclave", "config.yaml"))
 }
+
+func TestProfileTimeoutConfig(t *testing.T) {
+	first, idle := (TimeoutConfig{FirstToken: "45s", Idle: "2m"}).Resolve()
+	if first.Seconds() != 45 || idle.Seconds() != 120 {
+		t.Fatalf("timeouts = %s, %s", first, idle)
+	}
+}

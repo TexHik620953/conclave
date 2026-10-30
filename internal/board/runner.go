@@ -380,10 +380,25 @@ func (r *Runner) logEvent(attemptID, taskID string, ev domain.Event) {
 	}
 }
 
+const maxTaskRetries = 3
+
 func (r *Runner) fail(ctx context.Context, id, actor string, err error) {
-	_, _ = r.deps.Tracker.AddComment(context.Background(), id, actor, "failed: "+err.Error())
-	_, _ = r.deps.Tracker.Transition(context.Background(), id, tracker.StatusBlocked, actor)
-	r.publish("board.changed", "task blocked: "+id+" "+err.Error())
+	task, _ := r.deps.Tracker.Get(context.Background(), id)
+	attempts := 1
+	if task != nil && task.Attempts > 0 {
+		attempts = task.Attempts
+	}
+	if attempts <= maxTaskRetries {
+		_, _ = r.deps.Tracker.AddComment(context.Background(), id, actor,
+			fmt.Sprintf("attempt %d/%d failed: %s; retrying from checkpoint", attempts, maxTaskRetries+1, err.Error()))
+		_, _ = r.deps.Tracker.Transition(context.Background(), id, tracker.StatusReady, actor)
+		r.publish("board.changed", fmt.Sprintf("task retry %d/%d: %s", attempts, maxTaskRetries+1, id))
+		return
+	}
+	reason := fmt.Sprintf("failed after %d attempts: %s", attempts, err.Error())
+	_, _ = r.deps.Tracker.AddComment(context.Background(), id, actor, reason)
+	_ = r.deps.Tracker.FailToBacklog(context.Background(), id, actor, reason)
+	r.publish("board.changed", "task failed: "+id+" "+err.Error())
 }
 
 func (r *Runner) publish(typ, text string) {

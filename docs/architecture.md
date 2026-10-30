@@ -126,7 +126,8 @@ backlog
   → review
   → done
 
-claimed/in_progress → blocked
+claimed/in_progress → blocked (needs human/external input)
+claimed/in_progress → backlog + FAILED marker (automatic retries exhausted)
 any non-terminal state → cancelled
 ```
 
@@ -206,8 +207,11 @@ The checkpoint contains:
 - base commit;
 - full message history.
 
-Checkpoints are updated after each assistant/tool message. On cancellation the
-worktree and conversation are preserved. A resumed task:
+Checkpoints are updated after each assistant/tool message. A worker error also
+preserves the checkpoint. The board retries up to three times automatically;
+after that the task returns to **Backlog** with a `FAILED` badge. Moving it back
+to Ready resumes from the same worktree and conversation instead of rebuilding
+context. A resumed task:
 
 1. loads the checkpoint;
 2. repairs dangling tool calls;

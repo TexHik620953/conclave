@@ -29,24 +29,26 @@ import (
 )
 
 type App struct {
-	mu        sync.Mutex
-	cfg       *config.Config
-	profile   config.Profile
-	store     *store.Store
-	bus       *event.Bus
-	session   *domain.Session
-	cwd       string
-	clients   map[string]llm.Client
-	clientMu  sync.Mutex
-	busy      bool
-	concl     *conclave.Service
-	conclKey  string
-	mcpMgr    *mcp.Manager
-	jobMgr    *jobs.Manager
-	track     *tracker.Service
-	usage     *usage.Service
-	questions *questions.Service
-	queue     *board.Runner
+	mu              sync.Mutex
+	cfg             *config.Config
+	profile         config.Profile
+	profileName     string
+	profileOverride string
+	store           *store.Store
+	bus             *event.Bus
+	session         *domain.Session
+	cwd             string
+	clients         map[string]llm.Client
+	clientMu        sync.Mutex
+	busy            bool
+	concl           *conclave.Service
+	conclKey        string
+	mcpMgr          *mcp.Manager
+	jobMgr          *jobs.Manager
+	track           *tracker.Service
+	usage           *usage.Service
+	questions       *questions.Service
+	queue           *board.Runner
 }
 
 type SessionInfo struct {
@@ -76,10 +78,18 @@ func New(ctx context.Context, cwd, profileName string) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
+	profileOverride := strings.TrimSpace(profileName)
+	if profileName == "" {
+		profileName = cfg.WorkspaceProfile
+	}
 	if profileName == "" {
 		profileName = cfg.DefaultProfile
 	}
 	profile, err := cfg.Profile(profileName)
+	if err != nil && profileOverride == "" && cfg.WorkspaceProfile != "" {
+		profileName = cfg.DefaultProfile
+		profile, err = cfg.Profile(profileName)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +120,7 @@ func New(ctx context.Context, cwd, profileName string) (*App, error) {
 		return nil, err
 	}
 	a := &App{
-		cfg: cfg, profile: profile, store: st, bus: bus,
+		cfg: cfg, profile: profile, profileName: profileName, profileOverride: profileOverride, store: st, bus: bus,
 		cwd: abs, clients: map[string]llm.Client{},
 		mcpMgr:    mcp.Connect(ctx, cfg.MCP),
 		jobMgr:    jobs.New(bus, ""),
@@ -196,7 +206,51 @@ func (a *App) ProfileConfig() config.Profile {
 	return a.profile
 }
 func (a *App) ProfileName() string {
-	return a.cfg.DefaultProfile
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.profileName
+}
+
+func (a *App) ProfileNames() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := make([]string, 0, len(a.cfg.Profiles))
+	for name := range a.cfg.Profiles {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// SetProfile switches the active profile for this workspace and persists it in
+// .conclave/config.yaml. It is rejected while any agent or queue is active.
+func (a *App) SetProfile(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("profile name is required")
+	}
+	a.mu.Lock()
+	if a.busy || (a.concl != nil && a.concl.Busy()) || (a.queue != nil && a.queue.Running()) {
+		a.mu.Unlock()
+		return fmt.Errorf("cannot switch profile while an agent, Conclave run or queue is active")
+	}
+	cfg := a.cfg
+	a.mu.Unlock()
+	if _, err := cfg.Profile(name); err != nil {
+		return err
+	}
+	if err := config.SetWorkspaceProfile(a.cwd, name); err != nil {
+		return err
+	}
+	a.mu.Lock()
+	previousOverride := a.profileOverride
+	a.profileOverride = name
+	a.mu.Unlock()
+	err := a.reloadConfig()
+	a.mu.Lock()
+	a.profileOverride = previousOverride
+	a.mu.Unlock()
+	return err
 }
 
 func (a *App) Sessions(ctx context.Context) ([]SessionInfo, error) {
@@ -328,6 +382,7 @@ func (a *App) State() State {
 	cwd := a.cwd
 	busy := a.busy
 	concl := a.concl
+	profileName := a.profileName
 	a.mu.Unlock()
 
 	// Never call into Conclave while holding App.mu: Conclave callbacks can
@@ -342,7 +397,7 @@ func (a *App) State() State {
 		info = llm.ModelFromRef(sess.Model, model)
 		limit = info.Context
 	}
-	return State{Session: sess, Cwd: cwd, ProfileName: cfg.DefaultProfile, ContextLimit: limit, Model: info, Busy: busy}
+	return State{Session: sess, Cwd: cwd, ProfileName: profileName, ContextLimit: limit, Model: info, Busy: busy}
 }
 
 func (a *App) Conclave() *conclave.Service {
@@ -367,6 +422,7 @@ func (a *App) ensureConclave() {
 func (a *App) clientUnlocked(ref string) (llm.Client, llm.Model, error) {
 	a.mu.Lock()
 	cfg := a.cfg
+	profile := a.profile
 	a.mu.Unlock()
 	a.clientMu.Lock()
 	defer a.clientMu.Unlock()
@@ -378,7 +434,8 @@ func (a *App) clientUnlocked(ref string) (llm.Client, llm.Model, error) {
 	if c, ok := a.clients[m.Provider]; ok {
 		return c, info, nil
 	}
-	c := llm.NewOpenAI(m.ProviderConfig)
+	firstToken, idle := profile.Timeouts.Resolve()
+	c := llm.NewOpenAIWithTimeouts(m.ProviderConfig, firstToken, idle)
 	a.clients[m.Provider] = c
 	return c, info, nil
 }
@@ -575,7 +632,11 @@ func (a *App) Chdir(path string) error {
 	if err != nil {
 		return err
 	}
-	profile, err := cfg.Profile(cfg.DefaultProfile)
+	profileName := cfg.WorkspaceProfile
+	if profileName == "" {
+		profileName = cfg.DefaultProfile
+	}
+	profile, err := cfg.Profile(profileName)
 	if err != nil {
 		return err
 	}
@@ -592,6 +653,8 @@ func (a *App) Chdir(path string) error {
 	a.mcpMgr = newMCP
 	a.cfg = cfg
 	a.profile = profile
+	a.profileName = profileName
+	a.profileOverride = ""
 	a.cwd = abs
 	a.track = newTracker
 	a.conclKey = ""
@@ -921,7 +984,18 @@ func (a *App) reloadConfig() error {
 	if err != nil {
 		return err
 	}
-	profile, err := cfg.Profile(cfg.DefaultProfile)
+	profileName := a.profileOverride
+	if profileName == "" {
+		profileName = cfg.WorkspaceProfile
+	}
+	if profileName == "" {
+		profileName = cfg.DefaultProfile
+	}
+	profile, err := cfg.Profile(profileName)
+	if err != nil && a.profileOverride == "" && cfg.WorkspaceProfile != "" {
+		profileName = cfg.DefaultProfile
+		profile, err = cfg.Profile(profileName)
+	}
 	if err != nil {
 		return err
 	}
@@ -931,6 +1005,7 @@ func (a *App) reloadConfig() error {
 	a.mcpMgr = mcp.Connect(context.Background(), cfg.MCP)
 	a.cfg = cfg
 	a.profile = profile
+	a.profileName = profileName
 	a.clients = map[string]llm.Client{}
 	a.conclKey = ""
 	a.queue = nil

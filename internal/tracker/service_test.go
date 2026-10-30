@@ -154,3 +154,46 @@ func TestAssignBatchMakesTasksReady(t *testing.T) {
 		}
 	}
 }
+
+func TestFailedTaskCanBeRetried(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "db.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	tr, err := New(st.DB(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	task, err := tr.Create(ctx, CreateInput{Title: "retry", Status: StatusReady, Complexity: 2, CreatedBy: "user"}, "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err = tr.Transition(ctx, task.ID, StatusClaimed, "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err = tr.Transition(ctx, task.ID, StatusInProgress, "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tr.FailToBacklog(ctx, task.ID, "worker", "provider timeout"); err != nil {
+		t.Fatal(err)
+	}
+	task, err = tr.Get(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.Status != StatusBacklog || task.FailureReason != "provider timeout" || task.FailureAt == nil {
+		t.Fatalf("failed task = status %s reason %q at %v", task.Status, task.FailureReason, task.FailureAt)
+	}
+	task, err = tr.Transition(ctx, task.ID, StatusReady, "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.Status != StatusReady || task.FailureReason != "" || task.FailureAt != nil {
+		t.Fatalf("retried task = status %s reason %q at %v", task.Status, task.FailureReason, task.FailureAt)
+	}
+}

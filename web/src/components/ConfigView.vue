@@ -425,6 +425,10 @@ async function saveSearchConfig() {
             <label class="field"><span>Agent max steps</span><input v-model.number="profileForm.agent.max_steps" type="number" min="1" placeholder="120" /></label>
             <label class="field"><span>Master max steps</span><input v-model.number="profileForm.master.max_steps" type="number" min="1" placeholder="120" /></label>
           </div>
+          <div class="form-row">
+            <label class="field"><span>First token timeout</span><input v-model="profileForm.timeouts.first_token" placeholder="180s" /></label>
+            <label class="field"><span>Stream idle timeout</span><input v-model="profileForm.timeouts.idle" placeholder="180s" /></label>
+          </div>
         </div>
 
         <div class="editor-card">

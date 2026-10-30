@@ -8,6 +8,8 @@ export const store = reactive({
   providers: [],
   sessions: [],
   profile: null,
+  profileName: '',
+  profiles: [],
   counters: { board: 0, questions: 0, agents: 0 },
   board: { tasks: [], project: null, queue: { running: false, active: 0 } },
   conclave: null,
@@ -51,7 +53,7 @@ function armWatchdog() {
     toast('request timed out', 'error')
     try { await api.cancel(store.workspace.id) } catch {}
     try { await refreshState(true) } catch {}
-  }, 90000)
+  }, 30 * 60 * 1000) // server-side provider timeouts are authoritative; this is only a last-resort UI guard
 }
 
 function messageToChat(m, index) {
@@ -94,6 +96,8 @@ export function applyPayload(payload, resetChat = true) {
   store.providers = payload.providers || []
   store.sessions = payload.sessions || []
   store.profile = payload.profile || null
+  store.profileName = payload.profile_name || payload.state?.profile_name || ''
+  store.profiles = payload.profiles || []
   store.counters = payload.counters || store.counters
   store.conclave = payload.conclave || null
   store.ledger = payload.state?.session?.ledger || store.ledger
@@ -312,6 +316,9 @@ export async function switchMode(mode) {
 }
 export async function switchModel(model) {
   try { applyPayload(await api.setModel(store.workspace.id, model), false); toast('model: ' + model) } catch (e) { toast(e.message, 'error') }
+}
+export async function switchProfile(profile) {
+  try { applyPayload(await api.setProfile(store.workspace.id, profile), false); toast('profile: ' + profile); return true } catch (e) { toast(e.message, 'error'); return false }
 }
 export async function switchEffort(effort) {
   try { applyPayload(await api.setEffort(store.workspace.id, effort), false) } catch (e) { toast(e.message, 'error') }

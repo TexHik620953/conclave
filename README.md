@@ -38,6 +38,9 @@ is stored locally under `.conclave/`.
 - Task attempts, execution logs, comments, branches and commits.
 - Review workflow: `Backlog → Ready → In Progress → Review → Done`.
 - Failed/paused work keeps a checkpoint and can continue from the same worktree.
+- Automatic worker retries (3 by default).
+- After retries are exhausted the task returns to **Backlog** with a small **FAILED** badge and preserved checkpoint.
+- Moving that task back to Ready resumes from the checkpoint.
 
 ### Workspaces and sessions
 
@@ -213,7 +216,14 @@ profiles:
     limits:
       max_parallel: 8
       max_iterations: 6
+    timeouts:
+      first_token: 180s
+      idle: 180s
 ```
+
+Each workspace can select its active profile from the top bar. The choice is
+stored as `workspace_profile` in `<workspace>/.conclave/config.yaml` and is used
+by Build, Conclave and Board tasks in that workspace.
 
 Worker concurrency is the minimum of:
 
@@ -285,7 +295,9 @@ Typical statuses:
 
 ```text
 backlog → ready → claimed → in_progress → review → done
-                   ↘ blocked / cancelled
+                   ↘ blocked
+                   ↘ backlog + FAILED badge (retries exhausted)
+                   ↘ cancelled
 ```
 
 - Only **Ready** tasks are visible to the queue.
@@ -364,8 +376,8 @@ conclave help                  show help
 | `DEEPSEEK_API_KEY` | API key for the default DeepSeek provider |
 | `OPENROUTER_API_KEY` | API key for the default OpenRouter provider |
 | `CONCLAVE_DB` | Override the SQLite database path |
-| `CONCLAVE_LLM_FIRST_TOKEN_TIMEOUT` | First-token timeout, default `180s` |
-| `CONCLAVE_LLM_IDLE_TIMEOUT` | Stream idle timeout, default `180s` |
+| `CONCLAVE_LLM_FIRST_TOKEN_TIMEOUT` | Fallback first-token timeout |
+| `CONCLAVE_LLM_IDLE_TIMEOUT` | Fallback stream idle timeout |
 | `XDG_CONFIG_HOME` | Override the global config location |
 
 ---

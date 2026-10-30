@@ -30,8 +30,16 @@ type OpenAI struct {
 var errProviderTimeout = errors.New("provider timeout")
 
 func NewOpenAI(p config.Provider) *OpenAI {
-	firstToken := durationEnv("CONCLAVE_LLM_FIRST_TOKEN_TIMEOUT", 180*time.Second)
-	idle := durationEnv("CONCLAVE_LLM_IDLE_TIMEOUT", 180*time.Second)
+	return NewOpenAIWithTimeouts(p, 0, 0)
+}
+
+func NewOpenAIWithTimeouts(p config.Provider, firstToken, idle time.Duration) *OpenAI {
+	if firstToken <= 0 {
+		firstToken = durationEnv("CONCLAVE_LLM_FIRST_TOKEN_TIMEOUT", 180*time.Second)
+	}
+	if idle <= 0 {
+		idle = durationEnv("CONCLAVE_LLM_IDLE_TIMEOUT", 180*time.Second)
+	}
 	return &OpenAI{
 		baseURL: strings.TrimRight(p.BaseURL, "/"),
 		apiKey:  p.APIKey,

@@ -305,7 +305,7 @@ const stats = computed(() => {
         <div><span class="status-dot ready"></span><b>Ready</b><p>Задача разрешена к исполнению. Очередь может забрать её, если совпадают complexity, labels и есть свободный worker slot.</p></div>
         <div><span class="status-dot active"></span><b>In Progress</b><p>Воркер уже забрал задачу (claimed) или работает над ней в отдельном git worktree. Здесь видны branch и commit.</p></div>
         <div><span class="status-dot review"></span><b>Review</b><p>Воркер закончил, сделал commit и оставил отчёт. Нужно проверить diff и тесты: принять в Done или вернуть в Ready.</p></div>
-        <div><span class="status-dot blocked"></span><b>Blocked</b><p>Задача не завершилась: ошибка воркера, конфликт, зависимость или нужна помощь человека. Очередь её не трогает.</p></div>
+        <div><span class="status-dot blocked"></span><b>Blocked</b><p>Задача ждёт человека или внешнего решения: вопрос, зависимость, конфликт. Очередь её не трогает.</p></div>
         <div><span class="status-dot done"></span><b>Done</b><p>Результат принят. Ветку задачи можно применить/смержить в рабочее дерево.</p></div>
       </div>
       <footer>
@@ -335,6 +335,7 @@ const stats = computed(() => {
               <span class="chip p">P{{ task.priority }}</span>
               <span class="chip c">C{{ task.complexity }}</span>
               <span v-if="task.kind === 'research'" class="chip research">research</span>
+              <span v-if="task.failure_at || task.failure_reason" class="task-failed-badge">FAILED</span>
             </div>
             <h3>{{ task.title }}</h3>
             <div class="task-meta">
@@ -537,7 +538,7 @@ const stats = computed(() => {
               <button v-if="detailTask.status === 'backlog'" class="btn" @click="move(detailTask, 'ready')">Move to Ready</button>
               <button v-if="detailTask.status === 'review'" class="btn" @click="move(detailTask, 'done')">Approve Done</button>
               <button v-if="detailTask.status === 'review'" class="btn ghost" @click="move(detailTask, 'ready')">Reopen</button>
-              <button v-if="detailTask.status === 'blocked'" class="btn ghost" @click="move(detailTask, 'ready')">Retry</button>
+              <button v-if="detailTask.status === 'blocked' || detailTask.failure_at" class="btn ghost" @click="move(detailTask, 'ready')">Retry</button>
               <button class="btn ghost danger delete-task-btn" :disabled="detailTask.status === 'in_progress' || detailTask.status === 'claimed'" @click="removeTask(detailTask)">
                 {{ deleteTaskArmed ? 'Confirm delete' : 'Delete task' }}
               </button>

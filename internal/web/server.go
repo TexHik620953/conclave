@@ -57,6 +57,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/cancel", s.cancel)
 	mux.HandleFunc("/api/mode", s.mode)
 	mux.HandleFunc("/api/model", s.model)
+	mux.HandleFunc("/api/profile", s.profile)
 	mux.HandleFunc("/api/effort", s.effort)
 	mux.HandleFunc("/api/plan-only", s.planOnly)
 	mux.HandleFunc("/api/session/new", s.newSession)

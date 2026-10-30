@@ -45,6 +45,7 @@ The top bar shows:
 
 - current workspace and project key;
 - number of running agents;
+- workspace profile selector;
 - Build/Conclave mode selector;
 - Plan-only toggle in Build;
 - model selector;
@@ -52,6 +53,19 @@ The top bar shows:
 
 The agent counter is updated from queue events and reflects currently claimed
 worker tasks.
+
+### Workspace profile
+
+The profile selector in the top bar controls which profile is used for the
+workspace. The choice is persisted in:
+
+```text
+<workspace>/.conclave/config.yaml
+workspace_profile: default
+```
+
+It is used by Build, Conclave and Board queue tasks. Switching is blocked while
+an agent, Conclave run or queue is active.
 
 ## Chat
 

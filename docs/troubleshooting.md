@@ -39,6 +39,16 @@ export CONCLAVE_LLM_IDLE_TIMEOUT=300s
 ./conclave serve --addr 127.0.0.1:8787
 ```
 
+Or set them per profile in **Config → Profiles**:
+
+```yaml
+profiles:
+  default:
+    timeouts:
+      first_token: 300s
+      idle: 300s
+```
+
 Timeout failures are retried once. The worker checkpoint remains on disk, so a
 retry can continue from the existing worktree and conversation.
 
@@ -136,6 +146,17 @@ state.
 
 If both the worktree and checkpoint are removed, the task cannot resume and will
 start a new attempt.
+
+## Task shows a FAILED badge
+
+After three automatic retry attempts the task returns to **Backlog** with a
+small **FAILED** badge. Its worktree and conversation checkpoint remain on disk.
+
+Move the task to **Ready** when you want to resume. The next attempt continues
+from the checkpoint instead of starting over.
+
+**Blocked** is reserved for questions, dependencies or other cases that require
+human/external input.
 
 ## Queue does not claim a task
 

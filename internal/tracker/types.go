@@ -56,6 +56,8 @@ type Task struct {
 	Commit           string     `json:"commit,omitempty"`
 	ClaimOwner       string     `json:"claim_owner,omitempty"`
 	ClaimUntil       *time.Time `json:"claim_until,omitempty"`
+	FailureReason    string     `json:"failure_reason,omitempty"`
+	FailureAt        *time.Time `json:"failure_at,omitempty"`
 	CreatedAt        time.Time  `json:"created_at"`
 	UpdatedAt        time.Time  `json:"updated_at"`
 	ReadyAt          *time.Time `json:"ready_at,omitempty"`

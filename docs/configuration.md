@@ -66,6 +66,19 @@ profiles:
         openrouter: 8
 ```
 
+## Workspace profile
+
+Each workspace may select an active profile:
+
+```yaml
+# <workspace>/.conclave/config.yaml
+workspace_profile: cheap
+```
+
+The web UI exposes this as the profile selector in the top bar. If it is absent,
+`default_profile` from the global config is used. CLI `-p` overrides it for TUI
+and headless runs.
+
 ## Providers
 
 | Field | Description |
@@ -144,6 +157,23 @@ Worker concurrency is limited by:
 ```text
 min(worker.instances, provider.max_parallel, profile.limits.max_parallel)
 ```
+
+### Timeouts
+
+Per-profile model response timeouts:
+
+```yaml
+timeouts:
+  first_token: 300s
+  idle: 300s
+```
+
+- `first_token` — how long to wait for the first streamed token.
+- `idle` — maximum silence between stream chunks after the response starts.
+
+Environment variables `CONCLAVE_LLM_FIRST_TOKEN_TIMEOUT` and
+`CONCLAVE_LLM_IDLE_TIMEOUT` remain fallbacks when a profile does not set values.
+Timeout failures retry once, then fail the request/task.
 
 ### Limits
 
@@ -316,6 +346,9 @@ export CONCLAVE_LLM_FIRST_TOKEN_TIMEOUT=300s
 export CONCLAVE_LLM_IDLE_TIMEOUT=300s
 ./conclave serve --addr 127.0.0.1:8787
 ```
+
+Prefer per-profile values in `profiles.<name>.timeouts`; environment values are
+used only when the profile leaves them empty.
 
 Timeout failures are retried once before the task is reported as failed. The
 worker checkpoint remains available for retry.

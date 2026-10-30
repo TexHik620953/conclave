@@ -576,3 +576,19 @@ func SetGlobalSearch(s SearchConfig) error {
 	}
 	return writeGlobalDoc(doc, path)
 }
+
+// SetWorkspaceProfile stores the profile used by this workspace in the project
+// config. An empty name clears the override and falls back to default_profile.
+func SetWorkspaceProfile(cwd, name string) error {
+	doc, path, err := readProjectDoc(cwd)
+	if err != nil {
+		return err
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		delete(doc, "workspace_profile")
+	} else {
+		doc["workspace_profile"] = name
+	}
+	return writeProjectDoc(path, doc)
+}

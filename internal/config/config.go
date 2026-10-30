@@ -6,19 +6,21 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
-	Version        int                  `yaml:"version"`
-	DefaultProfile string               `yaml:"default_profile"`
-	Providers      map[string]Provider  `yaml:"providers"`
-	Profiles       map[string]Profile   `yaml:"profiles"`
-	MCP            map[string]MCPServer `yaml:"mcp,omitempty"`
-	Prompts        map[string]string    `yaml:"prompts,omitempty"`
-	Permissions    Permissions          `yaml:"permissions,omitempty"`
-	Search         SearchConfig         `yaml:"search,omitempty"`
+	Version          int                  `yaml:"version"`
+	DefaultProfile   string               `yaml:"default_profile"`
+	WorkspaceProfile string               `yaml:"workspace_profile,omitempty"`
+	Providers        map[string]Provider  `yaml:"providers"`
+	Profiles         map[string]Profile   `yaml:"profiles"`
+	MCP              map[string]MCPServer `yaml:"mcp,omitempty"`
+	Prompts          map[string]string    `yaml:"prompts,omitempty"`
+	Permissions      Permissions          `yaml:"permissions,omitempty"`
+	Search           SearchConfig         `yaml:"search,omitempty"`
 
 	Path    string `yaml:"-"`
 	Project string `yaml:"-"`
@@ -46,10 +48,31 @@ type Capabilities struct {
 }
 
 type Profile struct {
-	Agent   AgentConfig    `yaml:"agent" json:"agent"`
-	Master  AgentConfig    `yaml:"master" json:"master"`
-	Workers []WorkerConfig `yaml:"workers" json:"workers"`
-	Limits  Limits         `yaml:"limits" json:"limits"`
+	Agent    AgentConfig    `yaml:"agent" json:"agent"`
+	Master   AgentConfig    `yaml:"master" json:"master"`
+	Workers  []WorkerConfig `yaml:"workers" json:"workers"`
+	Limits   Limits         `yaml:"limits" json:"limits"`
+	Timeouts TimeoutConfig  `yaml:"timeouts,omitempty" json:"timeouts,omitempty"`
+}
+
+type TimeoutConfig struct {
+	FirstToken string `yaml:"first_token,omitempty" json:"first_token,omitempty"`
+	Idle       string `yaml:"idle,omitempty" json:"idle,omitempty"`
+}
+
+func (t TimeoutConfig) Resolve() (time.Duration, time.Duration) {
+	return durationSetting(t.FirstToken, "CONCLAVE_LLM_FIRST_TOKEN_TIMEOUT"),
+		durationSetting(t.Idle, "CONCLAVE_LLM_IDLE_TIMEOUT")
+}
+
+func durationSetting(raw, envName string) time.Duration {
+	if d, err := time.ParseDuration(strings.TrimSpace(raw)); err == nil && d > 0 {
+		return d
+	}
+	if d, err := time.ParseDuration(strings.TrimSpace(os.Getenv(envName))); err == nil && d > 0 {
+		return d
+	}
+	return 180 * time.Second
 }
 
 type AgentConfig struct {
@@ -191,6 +214,9 @@ func merge(dst *Config, src Config) {
 	}
 	if src.DefaultProfile != "" {
 		dst.DefaultProfile = src.DefaultProfile
+	}
+	if src.WorkspaceProfile != "" {
+		dst.WorkspaceProfile = src.WorkspaceProfile
 	}
 	if dst.Providers == nil {
 		dst.Providers = map[string]Provider{}
@@ -520,6 +546,9 @@ profiles:
       providers:
         deepseek: 4
         openrouter: 8
+    timeouts:
+      first_token: 180s
+      idle: 180s
 
 permissions:
   shell: allow

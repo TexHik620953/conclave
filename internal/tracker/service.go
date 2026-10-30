@@ -87,6 +87,8 @@ CREATE TABLE IF NOT EXISTS tracker_tasks (
   commit_hash TEXT NOT NULL DEFAULT '',
   claim_owner TEXT NOT NULL DEFAULT '',
   claim_until TEXT,
+  failure_reason TEXT NOT NULL DEFAULT '',
+  failure_at TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   ready_at TEXT,
@@ -120,7 +122,18 @@ CREATE TABLE IF NOT EXISTS task_logs (
 );
 CREATE INDEX IF NOT EXISTS task_logs_attempt ON task_logs(attempt_id,seq);
 `)
-	return err
+	if err != nil {
+		return err
+	}
+	_, _ = s.db.Exec(`ALTER TABLE tracker_tasks ADD COLUMN failure_reason TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE tracker_tasks ADD COLUMN failure_at TEXT`)
+	// Older versions used a dedicated failed status. Keep the failure marker
+	// visible, but failed tasks belong to Backlog.
+	_, _ = s.db.Exec(`UPDATE tracker_tasks SET status='backlog',
+		failure_reason=CASE WHEN failure_reason='' THEN 'failed after retries' ELSE failure_reason END,
+		failure_at=COALESCE(failure_at,updated_at)
+		WHERE status='failed'`)
+	return nil
 }
 
 func (s *Service) ensureProject(ctx context.Context, p Project) (Project, error) {
@@ -336,8 +349,11 @@ func (s *Service) Transition(ctx context.Context, id string, to TaskStatus, acto
 	if to == StatusReady || to == StatusBacklog {
 		assignee = ""
 	}
-	_, err = s.db.ExecContext(ctx, `UPDATE tracker_tasks SET status=?,assignee=?,updated_at=?,ready_at=COALESCE(?,ready_at) WHERE id=? AND project_id=?`,
-		string(to), assignee, now.Format(time.RFC3339Nano), readyAt, id, s.project.ID)
+	_, err = s.db.ExecContext(ctx, `UPDATE tracker_tasks SET status=?,assignee=?,updated_at=?,ready_at=COALESCE(?,ready_at),
+		failure_reason=CASE WHEN ?='ready' THEN '' ELSE failure_reason END,
+		failure_at=CASE WHEN ?='ready' THEN NULL ELSE failure_at END
+		WHERE id=? AND project_id=?`,
+		string(to), assignee, now.Format(time.RFC3339Nano), readyAt, string(to), string(to), id, s.project.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -631,6 +647,20 @@ func (s *Service) ByBatch(ctx context.Context, batchID string) ([]Task, error) {
 	return out, rows.Err()
 }
 
+// FailToBacklog stores the failure marker and returns the task to Backlog. The
+// checkpoint/worktree is intentionally left in place so an explicit retry can
+// continue from the same point.
+func (s *Service) FailToBacklog(ctx context.Context, id, actor, reason string) error {
+	now := time.Now().Format(time.RFC3339Nano)
+	_, err := s.db.ExecContext(ctx, `UPDATE tracker_tasks SET status=?,failure_reason=?,failure_at=?,assignee='',updated_at=? WHERE id=? AND project_id=?`,
+		string(StatusBacklog), reason, now, now, id, s.project.ID)
+	if err != nil {
+		return err
+	}
+	_, _ = s.db.ExecContext(ctx, `DELETE FROM tracker_claims WHERE task_id=?`, id)
+	return s.addEvent(ctx, id, "failed", actor, reason)
+}
+
 func (s *Service) SetTaskStatus(ctx context.Context, id string, status TaskStatus, actor string) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE tracker_tasks SET status=?,updated_at=? WHERE id=? AND project_id=?`,
 		string(status), time.Now().Format(time.RFC3339Nano), id, s.project.ID)
@@ -719,7 +749,7 @@ func canTransition(from, to TaskStatus) bool {
 	case StatusClaimed:
 		return to == StatusInProgress || to == StatusReady || to == StatusBlocked || to == StatusCancelled
 	case StatusInProgress:
-		return to == StatusReview || to == StatusBlocked || to == StatusCancelled || to == StatusReady
+		return to == StatusReview || to == StatusBlocked || to == StatusCancelled || to == StatusReady || to == StatusBacklog
 	case StatusReview:
 		return to == StatusDone || to == StatusReady || to == StatusBlocked
 	case StatusBlocked:
@@ -786,7 +816,7 @@ func insertEventTx(ctx context.Context, tx *sql.Tx, taskID, typ, actor, data str
 	return err
 }
 
-const taskColumns = `id,project_id,number,title,description,context,requirements,constraints,verification,out_of_scope,complexity,complexity_reason,priority,status,component,labels,epic,kind,parent_id,depends_on,write_scope,acceptance,created_by,origin_session_id,assignee,run_id,batch_id,attempts,branch,commit_hash,claim_owner,claim_until,created_at,updated_at,ready_at`
+const taskColumns = `id,project_id,number,title,description,context,requirements,constraints,verification,out_of_scope,complexity,complexity_reason,priority,status,component,labels,epic,kind,parent_id,depends_on,write_scope,acceptance,created_by,origin_session_id,assignee,run_id,batch_id,attempts,branch,commit_hash,claim_owner,claim_until,failure_reason,failure_at,created_at,updated_at,ready_at`
 
 type scanner interface {
 	Scan(dest ...any) error
@@ -796,10 +826,10 @@ func scanTask(row scanner) (*Task, error) {
 	var t Task
 	var labels, deps, scope, acceptance, requirements, constraints, verification, outOfScope string
 	var created, updated string
-	var claimUntil, readyAt sql.NullString
+	var claimUntil, readyAt, failureAt sql.NullString
 	err := row.Scan(&t.ID, &t.ProjectID, &t.Number, &t.Title, &t.Description, &t.Context, &requirements, &constraints, &verification, &outOfScope, &t.Complexity, &t.ComplexityReason, &t.Priority,
 		&t.Status, &t.Component, &labels, &t.Epic, &t.Kind, &t.ParentID, &deps, &scope, &acceptance, &t.CreatedBy, &t.OriginSessionID, &t.Assignee,
-		&t.RunID, &t.BatchID, &t.Attempts, &t.Branch, &t.Commit, &t.ClaimOwner, &claimUntil, &created, &updated, &readyAt)
+		&t.RunID, &t.BatchID, &t.Attempts, &t.Branch, &t.Commit, &t.ClaimOwner, &claimUntil, &t.FailureReason, &failureAt, &created, &updated, &readyAt)
 	if err != nil {
 		return nil, err
 	}
@@ -820,6 +850,10 @@ func scanTask(row scanner) (*Task, error) {
 	if readyAt.Valid {
 		v, _ := time.Parse(time.RFC3339Nano, readyAt.String)
 		t.ReadyAt = &v
+	}
+	if failureAt.Valid {
+		v, _ := time.Parse(time.RFC3339Nano, failureAt.String)
+		t.FailureAt = &v
 	}
 	return &t, nil
 }

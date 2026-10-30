@@ -9,7 +9,7 @@ import QuestionsView from './components/QuestionsView.vue'
 import { api, connectGlobalEvents } from './api'
 import {
   applyPayload, closeWorkspace, compactSession, deleteSession, newSession, openSession, openWorkspace,
-  openLogs, refreshBoard, refreshState, store, switchEffort, switchMode, switchPlanOnly, toast,
+  openLogs, refreshBoard, refreshState, store, switchEffort, switchMode, switchPlanOnly, switchProfile, toast,
 } from './store'
 
 const pathInput = ref('')
@@ -105,6 +105,10 @@ async function removeSession() {
   const id = session.value?.id
   if (!id) return
   if (await deleteSession(id)) toast('session deleted')
+}
+async function changeProfile(event) {
+  const select = event.target
+  if (!await switchProfile(select.value)) select.value = store.profileName
 }
 function forgetCurrent() {
   if (!store.workspace) return
@@ -362,6 +366,9 @@ async function openBoard() { store.view = 'board'; await refreshBoard() }
           </div>
         </div>
         <div class="topbar-controls">
+          <select class="profile-select" :value="store.profileName" title="Workspace profile" @change="changeProfile">
+            <option v-for="name in store.profiles" :key="name" :value="name">{{ name }}</option>
+          </select>
           <div class="segmented">
             <button v-for="m in ['build','conclave']" :key="m" :class="{ active: session?.mode === m }" @click="changeMode(m)">{{ m }}</button>
           </div>
