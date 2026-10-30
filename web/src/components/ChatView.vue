@@ -269,6 +269,7 @@ const activeModel = computed(() => {
           <button v-if="plan" class="btn primary" :disabled="store.busy || conclave.busy" @click="conclaveAction('approve')">{{ (store.busy || conclave.busy) ? 'Master is finishing…' : 'Approve plan' }}</button>
           <button v-if="conclave.running" class="btn ghost" @click="conclaveAction('pause')">Pause run</button>
           <button v-if="conclave.run?.phase === 'paused'" class="btn" @click="conclaveAction('resume')">Resume run</button>
+          <button v-if="conclave.run?.phase === 'failed'" class="btn" :disabled="conclave.busy" @click="conclaveAction('retry_review')">Retry master review</button>
           <button v-if="conclave.running || conclave.run?.phase === 'paused'" class="btn ghost" @click="conclaveAction('cancel')">Cancel run</button>
         </div>
       </div>

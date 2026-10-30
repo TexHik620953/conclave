@@ -168,13 +168,7 @@ func (s *Server) statePayload(ws *workspace) map[string]any {
 	sort.Strings(models)
 	project := ws.App.Tracker().Project()
 	sessions, _ := ws.App.Sessions(context.Background())
-	tasks, _ := ws.App.Tracker().List(context.Background(), tracker.Filter{Limit: 1000})
-	open := 0
-	for _, t := range tasks {
-		if t.Status != tracker.StatusDone && t.Status != tracker.StatusCancelled {
-			open++
-		}
-	}
+	open, _ := ws.App.Tracker().CountOpen(context.Background())
 	qcount, _ := ws.App.Questions().Count(context.Background())
 	queueStatus := ws.App.Queue().Status()
 	agents := queueStatus.Active
@@ -466,6 +460,8 @@ func (s *Server) conclaveAction(w http.ResponseWriter, r *http.Request) {
 		err = ws.App.Conclave().Resume(context.Background())
 	case "cancel":
 		err = ws.App.Conclave().Cancel()
+	case "retry_review":
+		err = ws.App.Conclave().RetryReview(context.Background())
 	default:
 		err = fmt.Errorf("unknown action %q", req.Action)
 	}
@@ -1191,13 +1187,7 @@ func (s *Server) workspacesList(w http.ResponseWriter, r *http.Request) {
 		item := map[string]any{"path": rec.Path, "name": rec.Name, "key": rec.Key, "last_opened": rec.LastOpened, "exists": rec.Exists, "active": false, "state": "idle", "running_agents": 0, "open_tasks": 0, "pending_questions": 0}
 		if ws := byPath[rec.Path]; ws != nil {
 			st := ws.App.State()
-			tasks, _ := ws.App.Tracker().List(context.Background(), tracker.Filter{Limit: 1000})
-			open := 0
-			for _, t := range tasks {
-				if t.Status != tracker.StatusDone && t.Status != tracker.StatusCancelled {
-					open++
-				}
-			}
+			open, _ := ws.App.Tracker().CountOpen(context.Background())
 			q, _ := ws.App.Questions().Count(context.Background())
 			queue := ws.App.Queue().Status()
 			active := st.Busy || queue.Running || queue.Active > 0 || (ws.App.Conclave() != nil && ws.App.Conclave().Running())

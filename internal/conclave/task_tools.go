@@ -257,3 +257,69 @@ func (t rejectResultTool) Run(ctx context.Context, env tools.Env, args json.RawM
 	}
 	return "Rejected " + in.TaskID + "; task returned to Ready.", nil
 }
+
+type reviewResultsTool struct{ svc *Service }
+
+func (t reviewResultsTool) Name() string { return "review_results" }
+func (t reviewResultsTool) Spec() llm.Tool {
+	return llm.Tool{Name: "review_results", Description: "Apply all task review decisions in one call. Use this instead of many separate approve_result/reject_result calls.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"decisions": map[string]any{
+					"type": "array",
+					"items": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"task_id":  map[string]any{"type": "string", "description": "Board task ID"},
+							"verdict":  map[string]any{"type": "string", "enum": []string{"approve", "reject"}},
+							"feedback": map[string]any{"type": "string"},
+						},
+						"required": []string{"task_id", "verdict"},
+					},
+				},
+			},
+			"required": []string{"decisions"},
+		}}
+}
+func (t reviewResultsTool) Run(ctx context.Context, env tools.Env, args json.RawMessage) (string, error) {
+	var in struct {
+		Decisions []struct {
+			TaskID   string `json:"task_id"`
+			Verdict  string `json:"verdict"`
+			Feedback string `json:"feedback"`
+		} `json:"decisions"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return "", err
+	}
+	if len(in.Decisions) == 0 {
+		return "", fmt.Errorf("decisions are empty")
+	}
+	var approved, rejected int
+	var failures []string
+	actor := actor(env)
+	for _, d := range in.Decisions {
+		switch strings.ToLower(strings.TrimSpace(d.Verdict)) {
+		case "approve", "approved":
+			if err := t.svc.approveBoardTask(ctx, d.TaskID, actor, d.Feedback); err != nil {
+				failures = append(failures, d.TaskID+": "+err.Error())
+			} else {
+				approved++
+			}
+		case "reject", "rejected":
+			if err := t.svc.rejectBoardTask(ctx, d.TaskID, actor, d.Feedback); err != nil {
+				failures = append(failures, d.TaskID+": "+err.Error())
+			} else {
+				rejected++
+			}
+		default:
+			failures = append(failures, d.TaskID+": unknown verdict "+d.Verdict)
+		}
+	}
+	msg := fmt.Sprintf("Approved %d, rejected %d.", approved, rejected)
+	if len(failures) > 0 {
+		msg += " Errors: " + strings.Join(failures, "; ")
+	}
+	return msg, nil
+}

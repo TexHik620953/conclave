@@ -485,17 +485,88 @@ func (s *Service) Resume(ctx context.Context) error {
 	if s.tasks != nil && s.startQueue != nil {
 		var ids []string
 		for _, t := range s.run.Tasks {
-			if t.BoardID != "" {
+			if t.BoardID == "" {
+				continue
+			}
+			bt, err := s.tasks.Get(context.Background(), t.BoardID)
+			if err == nil && bt.Status == tracker.StatusReady {
 				ids = append(ids, t.BoardID)
 			}
 		}
-		_ = s.tasks.AssignBatch(context.Background(), ids, s.run.ID)
+		if len(ids) > 0 {
+			_ = s.tasks.AssignBatch(context.Background(), ids, s.run.ID)
+		}
 		_ = s.startQueue(context.Background())
 		go s.watchBatch(runCtx)
 		return nil
 	}
 	go s.execute(runCtx)
 	return nil
+}
+
+// RetryReview restarts the master review after a failed run. It also adopts
+// review tasks that were created outside the current batch by older workers.
+func (s *Service) RetryReview(ctx context.Context) error {
+	s.mu.Lock()
+	if s.busy || s.running {
+		s.mu.Unlock()
+		return fmt.Errorf("conclave is busy")
+	}
+	if s.run == nil || len(s.run.Tasks) == 0 {
+		s.mu.Unlock()
+		return fmt.Errorf("run has no tasks to review")
+	}
+	if s.run.Phase != domain.RunFailed && s.run.Phase != domain.RunPaused {
+		s.mu.Unlock()
+		return fmt.Errorf("run is not failed or paused (phase: %s)", s.run.Phase)
+	}
+	s.mu.Unlock()
+	s.adoptReviewTasks(ctx)
+	s.mu.Lock()
+	s.run.Phase = domain.RunRunning
+	s.run.Error = ""
+	runCtx, cancel := context.WithCancel(ctx)
+	s.cancel = cancel
+	s.running = true
+	s.mu.Unlock()
+	s.save()
+	s.publish("run.phase_changed", "", map[string]any{"phase": domain.RunRunning, "run_id": s.runID()})
+	go s.watchBatch(runCtx)
+	return nil
+}
+
+func (s *Service) adoptReviewTasks(ctx context.Context) {
+	if s.tasks == nil {
+		return
+	}
+	review, err := s.tasks.List(ctx, tracker.Filter{Status: []tracker.TaskStatus{tracker.StatusReview}, Limit: 1000})
+	if err != nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.run == nil {
+		return
+	}
+	known := map[string]bool{}
+	for _, t := range s.run.Tasks {
+		if t.BoardID != "" {
+			known[t.BoardID] = true
+		}
+	}
+	for _, bt := range review {
+		if known[bt.ID] {
+			continue
+		}
+		if err := s.tasks.SetBatchID(ctx, bt.ID, s.run.ID, s.run.ID); err != nil {
+			continue
+		}
+		s.run.Tasks = append(s.run.Tasks, domain.Task{
+			ID: bt.ID, BoardID: bt.ID, Title: bt.Title, Spec: bt.Description,
+			Complexity: bt.Complexity, Priority: bt.Priority, Kind: bt.Kind,
+			Status: domain.TaskReview,
+		})
+	}
 }
 
 func (s *Service) Cancel() error {
@@ -1355,16 +1426,16 @@ func (s *Service) reviewWithMaster(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	reg := tools.ReadOnly()
-	tools.AddWebSearch(reg, s.cfg.Search)
+	// Review is intentionally tool-light: the master must make decisions from
+	// the result versions and suggestions instead of inspecting every worktree.
+	reg := tools.NewRegistry()
 	reg.Add(submitPlanTool{svc: s})
 	reg.Add(finishRunTool{svc: s})
 	if s.tasks != nil {
 		reg.Add(createTaskTool{tr: s.tasks})
 		reg.Add(listTasksTool{tr: s.tasks})
 		reg.Add(commentTaskTool{tr: s.tasks})
-		reg.Add(approveResultTool{svc: s})
-		reg.Add(rejectResultTool{svc: s})
+		reg.Add(reviewResultsTool{svc: s})
 	}
 	reg.Add(listWorkersTool{profile: s.profile})
 	if s.questions != nil {
@@ -1390,10 +1461,11 @@ func (s *Service) reviewWithMaster(ctx context.Context) error {
 	})
 	res, err := rt.Run(ctx, []domain.Message{{
 		ID: domain.NewID("msg"), Role: domain.RoleUser, CreatedAt: time.Now(),
-		Content: report + "\n\nReview every task whose status is review. Call approve_result for accepted work and " +
-			"reject_result with concrete feedback for work that needs another attempt. Workers may only leave suggestions; " +
-			"if a follow-up is needed, create it yourself with create_task after reviewing. If work remains, call submit_plan " +
-			"with the next isolated task pool. If the goal and acceptance criteria are met, call finish_run with a concise final summary.",
+		Content: report + "\n\nReview every task whose status is review. Apply all decisions in ONE review_results call " +
+			"(approve or reject each task, with concrete feedback for rejections). Do not call approve_result/reject_result " +
+			"once per task. Workers may only leave suggestions; if a follow-up is needed, create it yourself with create_task " +
+			"after reviewing. If work remains, call submit_plan with the next isolated task pool. If the goal and acceptance " +
+			"criteria are met, call finish_run with a concise final summary.",
 	}})
 	s.mu.Lock()
 	if !streamed {

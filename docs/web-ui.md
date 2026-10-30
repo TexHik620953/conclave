@@ -157,7 +157,10 @@ answered or deleted.
 The task detail modal has a **Result** tab. Each successful worker attempt
 creates a result version containing the final assistant report.
 
-The Conclave master normally approves or rejects results automatically.
+The Conclave master normally approves or rejects results automatically. If a
+failed run needs to be resumed, Chat shows **Retry master review**. It adopts
+orphaned Review tasks and reruns the master review without reopening completed
+work.
 
 The same actions remain available manually:
 

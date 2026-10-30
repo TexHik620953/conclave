@@ -261,6 +261,13 @@ func (s *Service) Get(ctx context.Context, id string) (*Task, error) {
 	return t, nil
 }
 
+func (s *Service) CountOpen(ctx context.Context) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tracker_tasks WHERE project_id=? AND status NOT IN (?,?)`,
+		s.project.ID, string(StatusDone), string(StatusCancelled)).Scan(&n)
+	return n, err
+}
+
 func (s *Service) List(ctx context.Context, f Filter) ([]Task, error) {
 	var where []string
 	var args []any
@@ -980,15 +987,23 @@ func (s *Service) RefreshDependencyBlockers(ctx context.Context, taskID string) 
 }
 
 func (s *Service) RefreshAllDependencyBlockers(ctx context.Context) error {
-	tasks, err := s.List(ctx, Filter{Limit: 1000})
+	rows, err := s.db.QueryContext(ctx, `SELECT id FROM tracker_tasks
+		WHERE project_id=? AND status IN (?,?) AND depends_on NOT IN ('', '[]')`,
+		s.project.ID, string(StatusReady), string(StatusBlocked))
 	if err != nil {
 		return err
 	}
-	for _, t := range tasks {
-		if t.Status == StatusReady || t.Status == StatusBlocked {
-			if err := s.RefreshDependencyBlockers(ctx, t.ID); err != nil {
-				return err
-			}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	rows.Close()
+	for _, id := range ids {
+		if err := s.RefreshDependencyBlockers(ctx, id); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -1163,4 +1178,10 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func (s *Service) SetBatchID(ctx context.Context, id, batchID, runID string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE tracker_tasks SET batch_id=?,run_id=?,updated_at=? WHERE id=? AND project_id=?`,
+		batchID, runID, time.Now().Format(time.RFC3339Nano), id, s.project.ID)
+	return err
 }

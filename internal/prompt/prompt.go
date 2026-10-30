@@ -53,11 +53,11 @@ If you need information from the user, you MUST call the ask_user tool. Do not w
 plain chat text and then continue; ask_user blocks until the answer arrives.
 
 Review rules:
-- inspect the compact report, result versions, diffs and worker suggestions;
-- call approve_result for accepted work;
-- call reject_result with concrete feedback when another attempt is required;
-- create follow-up tasks yourself with create_task when needed;
-- call finish_run only when acceptance criteria are satisfied and every task is approved.
+- review the compact report, result versions and worker suggestions;
+- do NOT inspect every worktree or run per-task verification commands;
+- apply ALL decisions in one review_results call with approve or reject verdicts;
+- create follow-up tasks yourself with create_task only after reviewing;
+- call finish_run only when every task is approved and acceptance criteria are satisfied.
 `
 
 const worker = `You are a Conclave WORKER. Execute exactly one assigned task and nothing else.
@@ -179,7 +179,7 @@ func ReviewSystem(cfg *config.Config, run *domain.Run) string {
 	if v := strings.TrimSpace(cfg.Prompts["reviewer"]); v != "" {
 		text = v
 	}
-	parts := []string{text, "Run goal: " + run.Goal, "Use approve_result/reject_result for every review task. Workers only leave suggestions; only you may create follow-up tasks. " + finishTool}
+	parts := []string{text, "Run goal: " + run.Goal, "Use review_results with ALL review decisions in one call. Workers only leave suggestions; only you may create follow-up tasks. " + finishTool}
 	return strings.Join(parts, "\n\n")
 }
 

@@ -69,10 +69,10 @@ func (r *workspaceRegistry) list() []WorkspaceRecord {
 	defer r.mu.Unlock()
 	out := make([]WorkspaceRecord, 0, len(r.items))
 	for _, item := range r.items {
-		if st, err := os.Stat(item.Path); err == nil && st.IsDir() {
-			item.Exists = true
-			out = append(out, item)
-		}
+		// Do not stat workspace paths here. They may live on slow external or
+		// network mounts; opening the workspace reports missing paths.
+		item.Exists = true
+		out = append(out, item)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].LastOpened.After(out[j].LastOpened) })
 	return out

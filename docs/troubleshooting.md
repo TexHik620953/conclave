@@ -179,6 +179,19 @@ If a task still hits `maximum steps`, inspect its execution logs:
 
 A retried task resumes from its checkpoint with a fresh step budget.
 
+## Review tasks do not move to Done
+
+The Conclave master performs review, not the human. If a review run failed
+before the master could decide results, the run stays `failed` and tasks remain
+in Review.
+
+Open Chat and click **Retry master review**. Conclave resumes review, adopts
+review tasks left outside the batch by older workers, and shows them to the
+master. The master then calls `approve_result` / `reject_result`.
+
+If the run failed with provider authentication or a key-limit error, fix the
+provider key first.
+
 ## Tasks accumulate and none reach Done
 
 - Workers no longer create tasks directly; they only record `suggest_task`

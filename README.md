@@ -42,6 +42,8 @@ is stored locally under `.conclave/`.
 - Result versions for review: every worker attempt records its final result.
 - The Conclave master reviews result versions and calls `approve_result` or
   `reject_result`; humans normally only answer agent questions.
+- Failed review runs can be resumed with **Retry master review**, including
+  orphan Review tasks created by older worker versions.
 - Workers cannot create tasks. They use `suggest_task`, and the master decides
   whether to create follow-up work.
 - Failed/paused work keeps a checkpoint and can continue from the same worktree.
