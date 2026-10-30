@@ -73,6 +73,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/config/default-profile", s.configDefaultProfile)
 	mux.HandleFunc("/api/config/mcp", s.configMCP)
 	mux.HandleFunc("/api/config/search", s.configSearch)
+	mux.HandleFunc("/api/config/server", s.configServer)
 	mux.HandleFunc("/api/config/test", s.configTest)
 	mux.HandleFunc("/api/providers", s.providers)
 	mux.HandleFunc("/api/providers/models", s.providerModels)

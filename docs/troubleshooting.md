@@ -165,6 +165,20 @@ When all blockers are resolved the task returns to Ready automatically. If a
 dependency task is deleted or never completed, edit the task dependencies and
 save it again.
 
+## `agent exceeded maximum steps`
+
+Conclave batches independent read-only tool calls when the model sends them in
+one assistant turn. Read-only shell commands and web search/fetch calls are
+eligible for parallel execution.
+
+If a task still hits `maximum steps`, inspect its execution logs:
+
+- many one-call turns mean the model is not batching;
+- parallelizable shell commands can be classified as read-only by the runtime;
+- `MaxSteps` can be increased per profile in Config → Profiles.
+
+A retried task resumes from its checkpoint with a fresh step budget.
+
 ## Task shows a FAILED badge
 
 After three automatic retry attempts the task returns to **Backlog** with a

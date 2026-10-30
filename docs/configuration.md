@@ -158,16 +158,12 @@ Worker concurrency is limited by:
 min(
   worker.instances,
   provider.max_parallel,
-  profile.limits.providers[provider],
   profile.limits.max_parallel
 )
 ```
 
-If a profile defines a provider cap, it overrides the provider-level
-`max_parallel`. For example, provider `openrouter.max_parallel: 16` with
-`limits.providers.openrouter: 8` still limits the run to 8 openrouter agents.
-
-The Profiles editor in the Web UI exposes these per-provider caps.
+Provider concurrency is configured only at the provider level. Profiles no
+longer duplicate it.
 
 ### Timeouts
 
@@ -192,9 +188,6 @@ Timeout failures retry once, then fail the request/task.
 limits:
   max_parallel: 8
   max_iterations: 6
-  providers:
-    openrouter: 8
-    deepseek: 4
 ```
 
 `max_iterations` controls how many Conclave task pools a run may execute.
@@ -281,6 +274,29 @@ prompts:
 
 Supported keys include `worker`, `worker.<worker-id>` and mode-specific prompt
 keys used by `internal/prompt`.
+
+## Web server address
+
+The address used by `conclave serve` is stored in the global config:
+
+```yaml
+server:
+  address: 127.0.0.1:8787
+```
+
+Examples:
+
+```yaml
+server:
+  address: 0.0.0.0:8811   # all interfaces
+  address: ":8811"        # all interfaces
+```
+
+`conclave serve --addr HOST:PORT` overrides the config value.
+
+The Web UI has **Global config → Server** for this setting. Changes require a
+server restart. Binding to `0.0.0.0` exposes the unauthenticated web UI to the
+network; use a firewall or reverse proxy.
 
 ## Web search
 

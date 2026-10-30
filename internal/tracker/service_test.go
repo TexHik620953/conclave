@@ -234,3 +234,43 @@ func TestDependencyBlockers(t *testing.T) {
 		t.Fatalf("dependent status = %s blockers %#v", b.Status, b.Blockers)
 	}
 }
+
+func TestResultVersionsAndVerdict(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "db.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	tr, err := New(st.DB(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	task, err := tr.Create(ctx, CreateInput{Title: "result", Status: StatusReady, Complexity: 2, CreatedBy: "user"}, "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, _ = tr.Transition(ctx, task.ID, StatusClaimed, "worker")
+	task, _ = tr.Transition(ctx, task.ID, StatusInProgress, "worker")
+	if _, err := tr.SaveResult(ctx, task.ID, "att1", 1, "first result"); err != nil {
+		t.Fatal(err)
+	}
+	task, _ = tr.Transition(ctx, task.ID, StatusReview, "worker")
+	task, _ = tr.Transition(ctx, task.ID, StatusReady, "user")
+	results, _ := tr.Results(ctx, task.ID)
+	if len(results) != 1 || results[0].Verdict != "rejected" {
+		t.Fatalf("after reject: %#v", results)
+	}
+	task, _ = tr.Transition(ctx, task.ID, StatusClaimed, "worker")
+	task, _ = tr.Transition(ctx, task.ID, StatusInProgress, "worker")
+	if _, err := tr.SaveResult(ctx, task.ID, "att2", 2, "second result"); err != nil {
+		t.Fatal(err)
+	}
+	task, _ = tr.Transition(ctx, task.ID, StatusReview, "worker")
+	task, _ = tr.Transition(ctx, task.ID, StatusDone, "user")
+	results, _ = tr.Results(ctx, task.ID)
+	if len(results) != 2 || results[0].Verdict != "approved" || results[1].Verdict != "rejected" {
+		t.Fatalf("after approve: %#v", results)
+	}
+}

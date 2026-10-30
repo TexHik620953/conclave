@@ -33,6 +33,7 @@ const mcpEditing = ref('')
 const mcpDeleteArmed = ref('')
 const mcpForm = reactive({ name: '', type: 'stdio', url: '', command: '', headers: '', environment: '', enabled: true })
 const searchForm = reactive({ provider: 'tavily', api_key: '', base_url: '', max_results: 5 })
+const serverAddress = ref('')
 
 const mcpServers = computed(() => Object.values(cfg.value?.mcp || {}).sort((a, b) => a.name.localeCompare(b.name)))
 const providers = computed(() => {
@@ -187,7 +188,7 @@ function removeWorker(i) { profileForm.value.workers.splice(i, 1) }
 function createProfile() {
   const name = newProfileName.value.trim()
   if (!name) { configError.value = 'Profile name is required'; return }
-  const src = profileForm.value ? JSON.parse(JSON.stringify(profileForm.value)) : { agent: { model: allModels.value[0] || '', effort: 'medium' }, master: { model: allModels.value[0] || '', effort: 'high' }, workers: [], limits: { max_parallel: 8, max_iterations: 6, providers: {} } }
+  const src = profileForm.value ? JSON.parse(JSON.stringify(profileForm.value)) : { agent: { model: allModels.value[0] || '', effort: 'medium' }, master: { model: allModels.value[0] || '', effort: 'high' }, workers: [], limits: { max_parallel: 8, max_iterations: 6 } }
   cfg.value.profiles[name] = src
   newProfileName.value = ''
   loadProfile(name)
@@ -295,6 +296,12 @@ async function removeMCP() {
     toast('MCP server deleted')
   } catch (e) { toast(e.message, 'error') }
 }
+async function saveServerConfig() {
+  try {
+    await api.saveServer({ address: serverAddress.value.trim() })
+    toast('server address saved; restart conclave serve to apply')
+  } catch (e) { toast(e.message, 'error') }
+}
 async function saveSearchConfig() {
   try {
     await api.saveSearch({ ...searchForm, max_results: Number(searchForm.max_results || 5) })
@@ -312,6 +319,7 @@ async function saveSearchConfig() {
         <button :class="{ active: tab === 'providers' }" @click="tab = 'providers'">Providers & models</button>
         <button :class="{ active: tab === 'profiles' }" @click="tab = 'profiles'">Profiles</button>
         <button :class="{ active: tab === 'mcp' }" @click="tab = 'mcp'">MCP & search</button>
+        <button :class="{ active: tab === 'server' }" @click="tab = 'server'">Server</button>
       </div>
       <button v-if="tab === 'providers'" class="btn primary" @click="startAdd">＋ Add provider</button>
     </header>
@@ -436,16 +444,6 @@ async function saveSearchConfig() {
             <label class="field"><span>Max parallel</span><input v-model.number="profileForm.limits.max_parallel" type="number" min="1" /></label>
             <label class="field"><span>Max iterations</span><input v-model.number="profileForm.limits.max_iterations" type="number" min="1" /></label>
           </div>
-          <div class="field full">
-            <span>Provider concurrency caps</span>
-            <small class="muted">Effective provider limit = min(provider max_parallel, this value, worker instances).</small>
-            <div class="provider-limit-grid">
-              <label v-for="p in providers" :key="p.name" class="field">
-                <span>{{ p.name }}</span>
-                <input v-model.number="profileForm.limits.providers[p.name]" type="number" min="1" :placeholder="'provider: ' + (p.max_parallel || 8)" />
-              </label>
-            </div>
-          </div>
           <div class="form-row">
             <label class="field"><span>Agent max steps</span><input v-model.number="profileForm.agent.max_steps" type="number" min="1" placeholder="120" /></label>
             <label class="field"><span>Master max steps</span><input v-model.number="profileForm.master.max_steps" type="number" min="1" placeholder="120" /></label>
@@ -472,6 +470,23 @@ async function saveSearchConfig() {
         </div>
       </div>
       <div v-else class="config-empty"><span>◇</span><h3>No profile selected</h3><p>Create a profile to configure models and workers.</p></div>
+    </div>
+
+    <div v-if="tab === 'server'" class="config-grid">
+      <div class="config-editor">
+        <div class="editor-card">
+          <div class="editor-head"><div><h3>Web server</h3><p class="muted">Address used by <code>conclave serve</code></p></div></div>
+          <label class="field full"><span>Listen address</span><input v-model="serverAddress" placeholder="127.0.0.1:8787" /></label>
+          <div class="server-hint">
+            <span>Examples</span>
+            <code>127.0.0.1:8787</code> — только локально;
+            <code>0.0.0.0:8811</code> — все интерфейсы;
+            <code>:8811</code> — все интерфейсы.
+          </div>
+          <div class="server-warning">Изменение адреса применяется только после перезапуска <code>conclave serve</code>.</div>
+          <div class="editor-actions"><button class="btn primary" @click="saveServerConfig">Save server address</button></div>
+        </div>
+      </div>
     </div>
 
     <div v-if="tab === 'mcp'" class="config-grid">

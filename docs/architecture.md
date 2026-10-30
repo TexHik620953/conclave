@@ -244,6 +244,10 @@ deleted after a task reaches review successfully.
 
 - SSE and `[DONE]` handling;
 - tool-call assembly across chunks;
+- batching of independent read-only tool calls;
+- parallel execution for read-only shell commands (`git log`, `grep`, `find`,
+  `sed -n`, etc.);
+- parallel web search/fetch calls;
 - reasoning content;
 - usage accounting;
 - retry for transient HTTP failures;
@@ -262,6 +266,23 @@ Override:
 export CONCLAVE_LLM_FIRST_TOKEN_TIMEOUT=300s
 export CONCLAVE_LLM_IDLE_TIMEOUT=300s
 ```
+
+## Tool batching
+
+The model can request several independent tools in one assistant turn. Conclave
+partitions the batch into read-only and side-effecting calls:
+
+- read-only calls run concurrently with up to 8 workers;
+- side-effecting calls run serially in the original order;
+- mixed batches run read-only calls first, then side effects.
+
+Read-only tools include file/list/glob/grep/git/web tools and shell commands
+classified as non-mutating. Shell redirection, in-place edits, commits, package
+builds and unknown commands force serial execution.
+
+If the model emits one tool call per turn, Conclave cannot batch it
+retroactively. The worker prompt explicitly asks the model to group independent
+reads, searches and fetches into a single turn.
 
 ## Events and web synchronization
 
@@ -286,6 +307,7 @@ SQLite tables cover:
 - events;
 - board projects and tasks;
 - task comments, events, attempts, logs, blockers and claims;
+- task result versions and their approval/rejection verdicts;
 - question sets;
 - usage records.
 

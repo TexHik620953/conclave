@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -180,50 +181,68 @@ type toolOutcome struct {
 }
 
 func (r *Runtime) runToolBatch(ctx context.Context, calls []domain.ToolCall) []toolOutcome {
-	parallel := len(calls) > 1
-	for _, call := range calls {
-		if !parallelSafe(call.Name) {
-			parallel = false
-			break
-		}
+	out := make([]toolOutcome, len(calls))
+	if len(calls) == 0 {
+		return out
 	}
 	batchID := ""
 	if len(calls) > 1 {
 		batchID = domain.NewID("batch")
 		r.publish("tools.batch.started", "", map[string]any{"agent_id": r.cfg.AgentID, "batch_id": batchID, "calls": calls})
 	}
-	out := make([]toolOutcome, len(calls))
-	if !parallel {
-		for i, call := range calls {
-			r.publish("tool.started", "", map[string]any{"agent_id": r.cfg.AgentID, "call": call, "batch_id": batchID})
-			text, err := r.runTool(ctx, call)
-			out[i] = toolOutcome{call: call, text: text, err: err, batchID: batchID}
+	runOne := func(i int) {
+		call := calls[i]
+		r.publish("tool.started", "", map[string]any{"agent_id": r.cfg.AgentID, "call": call, "batch_id": batchID})
+		text, err := r.runTool(ctx, call)
+		out[i] = toolOutcome{call: call, text: text, err: err, batchID: batchID}
+	}
+	runParallel := func(indexes []int) {
+		if len(indexes) == 0 {
+			return
 		}
-	} else {
-		sem := make(chan struct{}, 4)
+		sem := make(chan struct{}, 8)
 		var wg sync.WaitGroup
-		for i, call := range calls {
+		for _, i := range indexes {
 			wg.Add(1)
-			go func(i int, call domain.ToolCall) {
+			go func(i int) {
 				defer wg.Done()
 				defer func() {
 					if rec := recover(); rec != nil {
-						out[i] = toolOutcome{call: call, err: fmt.Errorf("tool %s panicked: %v", call.Name, rec), batchID: batchID}
+						out[i] = toolOutcome{call: calls[i], err: fmt.Errorf("tool %s panicked: %v", calls[i].Name, rec), batchID: batchID}
 					}
 				}()
 				select {
 				case sem <- struct{}{}:
 					defer func() { <-sem }()
 				case <-ctx.Done():
-					out[i] = toolOutcome{call: call, err: ctx.Err(), batchID: batchID}
+					out[i] = toolOutcome{call: calls[i], err: ctx.Err(), batchID: batchID}
 					return
 				}
-				r.publish("tool.started", "", map[string]any{"agent_id": r.cfg.AgentID, "call": call, "batch_id": batchID})
-				text, err := r.runTool(ctx, call)
-				out[i] = toolOutcome{call: call, text: text, err: err, batchID: batchID}
-			}(i, call)
+				runOne(i)
+			}(i)
 		}
 		wg.Wait()
+	}
+
+	var parallel, serial []int
+	for i, call := range calls {
+		if parallelSafeCall(call) {
+			parallel = append(parallel, i)
+		} else {
+			serial = append(serial, i)
+		}
+	}
+	// Read-only calls can run together even when the same assistant turn also
+	// contains a side-effecting call (for example a shell write).
+	if len(parallel) > 1 {
+		runParallel(parallel)
+	} else {
+		for _, i := range parallel {
+			runOne(i)
+		}
+	}
+	for _, i := range serial {
+		runOne(i)
 	}
 	if batchID != "" {
 		r.publish("tools.batch.completed", "", map[string]any{"agent_id": r.cfg.AgentID, "batch_id": batchID, "count": len(calls)})
@@ -231,13 +250,70 @@ func (r *Runtime) runToolBatch(ctx context.Context, calls []domain.ToolCall) []t
 	return out
 }
 
-func parallelSafe(name string) bool {
-	switch name {
-	case "read_file", "list_dir", "glob", "grep", "git", "web_fetch":
+func parallelSafeCall(call domain.ToolCall) bool {
+	switch call.Name {
+	case "read_file", "list_dir", "glob", "grep", "git", "web_fetch", "web_search", "list_tasks", "list_workers":
 		return true
+	case "shell":
+		return shellReadOnly(call.Arguments)
 	default:
 		return false
 	}
+}
+
+func shellReadOnly(raw string) bool {
+	var in struct {
+		Command string `json:"command"`
+	}
+	if json.Unmarshal([]byte(raw), &in) != nil {
+		return false
+	}
+	command := strings.TrimSpace(in.Command)
+	if command == "" {
+		return false
+	}
+	command = strings.ReplaceAll(command, "2>/dev/null", "")
+	command = strings.ReplaceAll(command, "2>&1", "")
+	if strings.Contains(command, ">") || strings.Contains(command, "<") ||
+		strings.Contains(command, "`") || strings.Contains(command, "$(") {
+		return false
+	}
+	// Split simple command chains and validate every segment. Pipes are fine
+	// only when every stage is a known read-only command.
+	normalized := strings.NewReplacer("&&", "\n", "||", "\n", ";", "\n", "|", "\n").Replace(command)
+	for _, segment := range strings.Split(normalized, "\n") {
+		fields := strings.Fields(strings.TrimSpace(segment))
+		if len(fields) == 0 {
+			continue
+		}
+		name := filepath.Base(fields[0])
+		switch name {
+		case "cd", "pwd", "ls", "cat", "head", "tail", "grep", "egrep", "rg", "find", "wc", "sort", "uniq", "cut", "awk", "jq", "stat", "file", "readlink", "realpath", "tree", "du", "df", "test", "true", "false":
+		case "sed":
+			if strings.Contains(" "+strings.Join(fields[1:], " ")+" ", " -i ") || strings.Contains(" "+strings.Join(fields[1:], " ")+" ", " --in-place") {
+				return false
+			}
+		case "git":
+			if len(fields) < 2 {
+				return false
+			}
+			switch fields[1] {
+			case "status", "log", "show", "diff", "rev-parse", "ls-tree", "ls-files", "branch", "merge-base", "grep", "blame", "describe", "tag":
+			default:
+				return false
+			}
+		default:
+			return false
+		}
+		joined := " " + strings.Join(fields[1:], " ") + " "
+		if name == "find" && (strings.Contains(joined, " -delete ") || strings.Contains(joined, " -exec ") || strings.Contains(joined, " -execdir ")) {
+			return false
+		}
+		if name == "awk" && strings.Contains(joined, "system(") {
+			return false
+		}
+	}
+	return true
 }
 
 func (r *Runtime) runTool(ctx context.Context, call domain.ToolCall) (string, error) {
@@ -294,7 +370,7 @@ func toolTimeout(name string) time.Duration {
 	switch name {
 	case "grep":
 		return 60 * time.Second
-	case "glob", "list_dir", "read_file", "web_fetch", "git":
+	case "glob", "list_dir", "read_file", "web_fetch", "web_search", "git":
 		return 30 * time.Second
 	case "shell", "shell_background":
 		return 10 * time.Minute

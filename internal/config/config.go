@@ -21,6 +21,7 @@ type Config struct {
 	Prompts          map[string]string    `yaml:"prompts,omitempty"`
 	Permissions      Permissions          `yaml:"permissions,omitempty"`
 	Search           SearchConfig         `yaml:"search,omitempty"`
+	Server           ServerConfig         `yaml:"server,omitempty"`
 
 	Path    string `yaml:"-"`
 	Project string `yaml:"-"`
@@ -94,9 +95,8 @@ type WorkerConfig struct {
 }
 
 type Limits struct {
-	MaxParallel   int            `yaml:"max_parallel" json:"max_parallel"`
-	MaxIterations int            `yaml:"max_iterations" json:"max_iterations"`
-	Providers     map[string]int `yaml:"providers,omitempty" json:"providers,omitempty"`
+	MaxParallel   int `yaml:"max_parallel" json:"max_parallel"`
+	MaxIterations int `yaml:"max_iterations" json:"max_iterations"`
 }
 
 type MCPServer struct {
@@ -115,6 +115,10 @@ type Permissions struct {
 	Network             string `yaml:"network,omitempty"`
 	AllowPrivateNetwork bool   `yaml:"allow_private_network,omitempty"`
 	Yolo                bool   `yaml:"yolo,omitempty"`
+}
+
+type ServerConfig struct {
+	Address string `yaml:"address,omitempty" json:"address,omitempty"`
 }
 
 type SearchConfig struct {
@@ -144,6 +148,7 @@ func Default() Config {
 			Network:    "allow",
 		},
 		Search: SearchConfig{Provider: "tavily", MaxResults: 5},
+		Server: ServerConfig{Address: "127.0.0.1:8787"},
 	}
 }
 
@@ -294,9 +299,13 @@ func merge(dst *Config, src Config) {
 	if src.Search.MaxResults > 0 {
 		dst.Search.MaxResults = src.Search.MaxResults
 	}
+	if src.Server.Address != "" {
+		dst.Server.Address = src.Server.Address
+	}
 }
 
 func (c *Config) expandEnv() {
+	c.Server.Address = os.ExpandEnv(c.Server.Address)
 	c.Search.APIKey = os.ExpandEnv(c.Search.APIKey)
 	c.Search.BaseURL = os.ExpandEnv(c.Search.BaseURL)
 	for name, srv := range c.MCP {
@@ -331,6 +340,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Search.MaxResults <= 0 {
 		c.Search.MaxResults = 5
+	}
+	if c.Server.Address == "" {
+		c.Server.Address = "127.0.0.1:8787"
 	}
 	if c.DefaultProfile == "" {
 		c.DefaultProfile = "default"
@@ -543,9 +555,6 @@ profiles:
     limits:
       max_parallel: 8
       max_iterations: 6
-      providers:
-        deepseek: 4
-        openrouter: 8
     timeouts:
       first_token: 180s
       idle: 180s

@@ -44,6 +44,7 @@ func New(db *sql.DB, cwd string) (*Service, error) {
 		return nil, err
 	}
 	s.project = p
+	s.backfillResults()
 	return s, nil
 }
 
@@ -130,6 +131,12 @@ CREATE TABLE IF NOT EXISTS task_blockers (
   task_id TEXT NOT NULL, kind TEXT NOT NULL, ref_id TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL, resolved_at TEXT, PRIMARY KEY(task_id,kind,ref_id)
 );
+CREATE TABLE IF NOT EXISTS task_results (
+  id TEXT PRIMARY KEY, task_id TEXT NOT NULL, attempt_id TEXT NOT NULL, attempt_no INTEGER NOT NULL,
+  content TEXT NOT NULL, verdict TEXT NOT NULL DEFAULT 'pending', created_at TEXT NOT NULL,
+  decided_at TEXT, decided_by TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS task_results_task ON task_results(task_id,created_at DESC);
 `)
 	if err != nil {
 		return err
@@ -389,6 +396,14 @@ func (s *Service) Transition(ctx context.Context, id string, to TaskStatus, acto
 		_, _ = s.db.ExecContext(ctx, `DELETE FROM tracker_claims WHERE task_id=?`, id)
 	}
 	_ = s.addEvent(ctx, id, "transition", actor, string(t.Status)+" -> "+string(to))
+	if t.Status == StatusReview {
+		switch to {
+		case StatusDone:
+			s.decidePendingResults(ctx, id, "approved", actor)
+		case StatusReady, StatusBacklog:
+			s.decidePendingResults(ctx, id, "rejected", actor)
+		}
+	}
 	if to == StatusReady {
 		_ = s.RefreshDependencyBlockers(ctx, id)
 	}
@@ -999,6 +1014,91 @@ func (s *Service) publishBoard(text string) {
 		return
 	}
 	s.bus.Publish(domain.Event{Type: "board.changed", Text: text, Time: time.Now()})
+}
+
+func (s *Service) SaveResult(ctx context.Context, taskID, attemptID string, attemptNo int, content string) (*Result, error) {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		content = "No assistant summary recorded."
+	}
+	now := time.Now()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	_, _ = tx.ExecContext(ctx, `UPDATE task_results SET verdict='rejected',decided_at=?,decided_by='superseded' WHERE task_id=? AND verdict='pending'`, now.Format(time.RFC3339Nano), taskID)
+	res := &Result{ID: domain.NewID("res"), TaskID: taskID, AttemptID: attemptID, AttemptNo: attemptNo, Content: content, Verdict: "pending", CreatedAt: now}
+	_, err = tx.ExecContext(ctx, `INSERT INTO task_results(id,task_id,attempt_id,attempt_no,content,verdict,created_at) VALUES(?,?,?,?,?,?,?)`,
+		res.ID, res.TaskID, res.AttemptID, res.AttemptNo, res.Content, res.Verdict, now.Format(time.RFC3339Nano))
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+func (s *Service) Results(ctx context.Context, taskID string) ([]Result, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id,task_id,attempt_id,attempt_no,content,verdict,created_at,decided_at,decided_by
+		FROM task_results WHERE task_id=? ORDER BY created_at DESC`, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Result
+	for rows.Next() {
+		var r Result
+		var created string
+		var decided sql.NullString
+		if err := rows.Scan(&r.ID, &r.TaskID, &r.AttemptID, &r.AttemptNo, &r.Content, &r.Verdict, &created, &decided, &r.DecidedBy); err != nil {
+			return nil, err
+		}
+		r.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
+		if decided.Valid {
+			v, _ := time.Parse(time.RFC3339Nano, decided.String)
+			r.DecidedAt = &v
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (s *Service) decidePendingResults(ctx context.Context, taskID, verdict, actor string) {
+	now := time.Now().Format(time.RFC3339Nano)
+	_, _ = s.db.ExecContext(ctx, `UPDATE task_results SET verdict=?,decided_at=?,decided_by=? WHERE task_id=? AND verdict='pending'`,
+		verdict, now, actor, taskID)
+}
+
+func (s *Service) backfillResults() {
+	rows, err := s.db.QueryContext(context.Background(), `SELECT id FROM tracker_tasks WHERE project_id=? AND status=? AND NOT EXISTS (SELECT 1 FROM task_results r WHERE r.task_id=tracker_tasks.id)`,
+		s.project.ID, string(StatusReview))
+	if err != nil {
+		return
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	rows.Close()
+	for _, taskID := range ids {
+		var attemptID string
+		var attemptNo int
+		_ = s.db.QueryRowContext(context.Background(), `SELECT id,attempt_no FROM task_attempts WHERE task_id=? AND status='review' ORDER BY attempt_no DESC LIMIT 1`, taskID).Scan(&attemptID, &attemptNo)
+		if attemptID == "" {
+			continue
+		}
+		var content string
+		_ = s.db.QueryRowContext(context.Background(), `SELECT content FROM task_logs WHERE task_id=? AND attempt_id=? AND kind='assistant' ORDER BY seq DESC LIMIT 1`, taskID, attemptID).Scan(&content)
+		if strings.TrimSpace(content) == "" {
+			continue
+		}
+		_, _ = s.SaveResult(context.Background(), taskID, attemptID, attemptNo, content)
+	}
 }
 
 const taskColumns = `id,project_id,number,title,description,context,requirements,constraints,verification,out_of_scope,complexity,complexity_reason,priority,status,component,labels,epic,kind,parent_id,depends_on,write_scope,acceptance,created_by,origin_session_id,assignee,run_id,batch_id,attempts,branch,base_commit,commit_hash,claim_owner,claim_until,failure_reason,failure_at,created_at,updated_at,ready_at`

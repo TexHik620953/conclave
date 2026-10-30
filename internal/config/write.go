@@ -612,3 +612,17 @@ func SetGlobalDefaultProfile(name string) error {
 	doc["default_profile"] = name
 	return writeGlobalDoc(doc, path)
 }
+
+func SetGlobalServerAddress(address string) error {
+	address = strings.TrimSpace(address)
+	if address == "" {
+		return fmt.Errorf("listen address is required")
+	}
+	doc, path, err := readGlobalDoc()
+	if err != nil {
+		return err
+	}
+	entry := ensureMap(doc, "server")
+	entry["address"] = address
+	return writeGlobalDoc(doc, path)
+}

@@ -67,6 +67,12 @@ instead of expanding the current task. Do not assign work to other agents direct
 Do not ask the user questions. If blocked, explain the blocker precisely in your final report.
 `
 
+const toolEfficiency = `Tool efficiency:
+- When several independent read-only operations are needed, request them together in one assistant turn so Conclave can execute them in parallel.
+- Prefer read_file, list_dir, glob and grep over shell commands for file inspection.
+- Batch independent web_search and web_fetch calls.
+- Do not batch dependent operations, writes to the same file, or side-effecting commands.`
+
 const reviewer = `You are a Conclave VERIFIER. Inspect the completed work objectively.
 Run the relevant tests and report failures, regressions and acceptance-criteria gaps.
 Do not modify code.
@@ -107,6 +113,7 @@ func Build(cfg *config.Config, profile config.Profile, mode domain.Mode, cwd, ex
 	if v := strings.TrimSpace(cfg.Prompts["system"]); v != "" {
 		parts = append(parts, v)
 	}
+	parts = append(parts, toolEfficiency)
 	parts = append(parts,
 		fmt.Sprintf("Workspace: %s", cwd),
 		fmt.Sprintf("Date: %s", time.Now().Format("2006-01-02")),
@@ -147,7 +154,7 @@ func WorkerSystem(cfg *config.Config, task domain.Task, w config.WorkerConfig, c
 	if override := strings.TrimSpace(cfg.Prompts["worker."+w.ID]); override != "" {
 		text = override
 	}
-	parts := []string{text,
+	parts := []string{text, toolEfficiency,
 		"Workspace: " + cwd,
 		"Task ID: " + task.ID,
 		"Title: " + task.Title,

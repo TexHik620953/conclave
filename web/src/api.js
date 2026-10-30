@@ -35,6 +35,7 @@ export const api = {
   saveMCP: (payload) => request('/api/config/mcp', { method: 'POST', body: JSON.stringify(payload) }),
   deleteMCP: (name) => request('/api/config/mcp?name=' + encodeURIComponent(name), { method: 'DELETE' }),
   saveSearch: (payload) => request('/api/config/search', { method: 'POST', body: JSON.stringify(payload) }),
+  saveServer: (payload) => request('/api/config/server', { method: 'POST', body: JSON.stringify(payload) }),
   deleteModel: (provider, model) => request('/api/config/model?provider=' + encodeURIComponent(provider) + '&model=' + encodeURIComponent(model), { method: 'DELETE' }),
   testProvider: (provider) => request('/api/config/test', { method: 'POST', body: JSON.stringify({ provider }) }),
   fs: (path = '') => request('/api/fs?path=' + encodeURIComponent(path)),

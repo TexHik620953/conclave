@@ -152,6 +152,16 @@ When all dependency blockers are resolved the task returns to Ready
 automatically. Question blockers work the same way after the question is
 answered or deleted.
 
+### Task results
+
+The task detail modal has a **Result** tab. Each successful worker attempt
+creates a result version containing the final assistant report.
+
+- **Approve** marks the latest result `approved` and moves the task to Done.
+- **Reject** marks it `rejected` and returns the task to Ready.
+- A later attempt creates a new version; previous versions stay visible.
+- Execution logs remain available in the **Execution logs** tab.
+
 ### Plan approval
 
 When Conclave has a pending plan, the board shows a banner:
@@ -231,7 +241,7 @@ opening a workspace:
 - MCP servers (stdio/HTTP, command/url/headers/environment, enabled);
 - native web search provider and keys;
 - global default profile;
-- per-profile provider concurrency caps;
+- web server listen address;
 - worker instances and complexity ranges;
 - per-profile LLM timeouts.
 

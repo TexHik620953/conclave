@@ -25,9 +25,6 @@ func newAdmission(p config.Profile, cfg *config.Config) *admission {
 	}
 	for name, provider := range cfg.Providers {
 		limit := provider.MaxParallel
-		if v, ok := p.Limits.Providers[name]; ok && v > 0 {
-			limit = v
-		}
 		if limit <= 0 {
 			limit = max
 		}

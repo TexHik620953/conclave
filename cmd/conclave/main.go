@@ -129,6 +129,9 @@ func modelsCmd(cwd string, args []string) error {
 
 func serveCmd(args []string) error {
 	addr := "127.0.0.1:8787"
+	if cfg, err := config.LoadGlobalOnly(); err == nil && cfg.Server.Address != "" {
+		addr = cfg.Server.Address
+	}
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--addr", "-a":
@@ -268,7 +271,7 @@ const help = `conclave — terminal multi-agent coding assistant
 
 Usage:
   conclave                      start the TUI
-  conclave serve [--addr]       start the web UI (default 127.0.0.1:8787)
+  conclave serve [--addr]       start the web UI (uses server.address config)
   conclave run "prompt"         run a single prompt headlessly
   conclave config init          create .conclave/config.yaml
   conclave config validate      validate configuration

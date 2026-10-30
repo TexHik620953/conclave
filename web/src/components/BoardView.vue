@@ -207,6 +207,8 @@ async function queue(action) {
   } catch (e) { toast(e.message, 'error') }
 }
 const detailTask = computed(() => detail.value?.task)
+const results = computed(() => detail.value?.results || [])
+const pendingResult = computed(() => results.value.find(r => r.verdict === 'pending') || null)
 
 function splitTool(content) {
   const text = content || ''
@@ -520,6 +522,7 @@ const stats = computed(() => {
 
         <div class="task-detail-tabs">
           <button :class="{ active: detailTab === 'overview' }" @click="setDetailTab('overview')">Overview</button>
+          <button :class="{ active: detailTab === 'result' }" @click="setDetailTab('result')">Result <span v-if="results.length">{{ results.length }}</span></button>
           <button :class="{ active: detailTab === 'logs' }" @click="setDetailTab('logs')">Execution logs <span v-if="detail.attempts?.length">{{ detail.attempts.length }}</span></button>
           <button :class="{ active: detailTab === 'comments' }" @click="setDetailTab('comments')">Comments & activity <span v-if="detail.comments?.length">{{ detail.comments.length }}</span></button>
         </div>
@@ -559,8 +562,8 @@ const stats = computed(() => {
             <div class="side-actions">
               <button class="btn ghost" @click="openEdit(detailTask)">Edit task</button>
               <button v-if="detailTask.status === 'backlog'" class="btn" @click="move(detailTask, 'ready')">Move to Ready</button>
-              <button v-if="detailTask.status === 'review'" class="btn" @click="move(detailTask, 'done')">Approve Done</button>
-              <button v-if="detailTask.status === 'review'" class="btn ghost" @click="move(detailTask, 'ready')">Reopen</button>
+              <button v-if="detailTask.status === 'review'" class="btn" @click="move(detailTask, 'done')">Approve result</button>
+              <button v-if="detailTask.status === 'review'" class="btn ghost" @click="move(detailTask, 'ready')">Reject result</button>
               <button v-if="detailTask.status === 'blocked' || detailTask.failure_at" class="btn ghost" @click="move(detailTask, 'ready')">Retry</button>
               <button class="btn ghost danger delete-task-btn" :disabled="detailTask.status === 'in_progress' || detailTask.status === 'claimed'" @click="removeTask(detailTask)">
                 {{ deleteTaskArmed ? 'Confirm delete' : 'Delete task' }}
@@ -602,6 +605,26 @@ const stats = computed(() => {
                 <div v-if="detailTask.depends_on?.length" class="kv"><span>Depends on</span><b>{{ detailTask.depends_on.join(', ') }}</b></div>
                 <div v-if="detailTask.write_scope?.length" class="kv"><span>Write scope</span><b>{{ detailTask.write_scope.join(', ') }}</b></div>
               </section>
+            </div>
+
+            <div v-else-if="detailTab === 'result'" class="result-pane">
+              <div v-if="pendingResult && detailTask.status === 'review'" class="result-actions">
+                <div><b>Review result</b><p>Approve the latest result or reject it and return the task to Ready.</p></div>
+                <div><button class="btn primary" @click="move(detailTask, 'done')">Approve</button><button class="btn ghost danger" @click="move(detailTask, 'ready')">Reject</button></div>
+              </div>
+              <div v-if="!results.length" class="empty-log">No result recorded yet.</div>
+              <div v-else class="result-list">
+                <article v-for="(r, idx) in results" :key="r.id" class="result-version">
+                  <header>
+                    <b>Result v{{ results.length - idx }}</b>
+                    <span>Attempt #{{ r.attempt_no }}</span>
+                    <span :class="['result-verdict', r.verdict]">{{ r.verdict }}</span>
+                    <time>{{ new Date(r.created_at).toLocaleString() }}</time>
+                  </header>
+                  <pre>{{ r.content }}</pre>
+                  <small v-if="r.decided_at">Decided {{ new Date(r.decided_at).toLocaleString() }}<template v-if="r.decided_by"> by {{ r.decided_by }}</template></small>
+                </article>
+              </div>
             </div>
 
             <div v-else-if="detailTab === 'logs'" class="logs-pane">

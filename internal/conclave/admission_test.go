@@ -24,11 +24,11 @@ func TestFindCycle(t *testing.T) {
 
 func TestAdmissionLimits(t *testing.T) {
 	p := config.Profile{
-		Workers: []config.WorkerConfig{{ID: "w", Instances: 1}},
-		Limits:  config.Limits{MaxParallel: 3, Providers: map[string]int{"p": 1}},
+		Workers: []config.WorkerConfig{{ID: "w", Instances: 2}},
+		Limits:  config.Limits{MaxParallel: 3},
 	}
 	cfg := &config.Config{Providers: map[string]config.Provider{
-		"p": {MaxParallel: 8, Models: map[string]config.Model{"m": {Context: 100}}},
+		"p": {MaxParallel: 1, Models: map[string]config.Model{"m": {Context: 100}}},
 	}}
 	a := newAdmission(p, cfg)
 	if !a.tryAcquire("p", "w") {

@@ -109,3 +109,31 @@ func TestParallelReadOnlyToolBatch(t *testing.T) {
 		t.Fatal("max concurrency was 1")
 	}
 }
+
+func TestShellReadOnlyClassification(t *testing.T) {
+	readOnly := []string{
+		`{"command":"git log --oneline -5"}`,
+		`{"command":"cd pkg && grep -n Auth . 2>/dev/null"}`,
+		`{"command":"git show HEAD --stat | head -40"}`,
+		`{"command":"find . -maxdepth 2 -name '*.go'"}`,
+		`{"command":"sed -n '1,20p' README.md"}`,
+	}
+	for _, raw := range readOnly {
+		if !shellReadOnly(raw) {
+			t.Errorf("expected read-only: %s", raw)
+		}
+	}
+	writes := []string{
+		`{"command":"echo x > file"}`,
+		`{"command":"sed -i 's/a/b/' file"}`,
+		`{"command":"git commit -am x"}`,
+		`{"command":"rm -rf dir"}`,
+		`{"command":"find . -delete"}`,
+		`{"command":"python3 -c 'open(\"x\",\"w\").write(\"x\")'"}`,
+	}
+	for _, raw := range writes {
+		if shellReadOnly(raw) {
+			t.Errorf("expected write/side effect: %s", raw)
+		}
+	}
+}

@@ -161,9 +161,6 @@ func (r *Runner) hasSlot(w config.WorkerConfig) bool {
 		return false
 	}
 	providerLimit := r.deps.Config.Providers[model.Provider].MaxParallel
-	if v, ok := r.deps.Profile.Limits.Providers[model.Provider]; ok && v > 0 {
-		providerLimit = v
-	}
 	if providerLimit <= 0 {
 		providerLimit = max
 	}
@@ -353,6 +350,7 @@ func (r *Runner) execute(ctx context.Context, task tracker.Task, w config.Worker
 	if summary == "" {
 		summary = "implemented"
 	}
+	_, _ = r.deps.Tracker.SaveResult(ctx, task.ID, attempt.ID, attempt.AttemptNo, summary)
 	_, _ = r.deps.Tracker.AddComment(ctx, task.ID, w.ID, summary)
 	_, err = r.deps.Tracker.Transition(ctx, task.ID, tracker.StatusReview, w.ID)
 	if err != nil {

@@ -571,6 +571,7 @@ func (s *Server) configGet(w http.ResponseWriter, r *http.Request) {
 			"max_results": cfg.Search.MaxResults, "has_key": cfg.Search.APIKey != "",
 			"masked_key": config.MaskKey(cfg.Search.APIKey),
 		},
+		"server": map[string]any{"address": cfg.Server.Address},
 	})
 }
 
@@ -587,6 +588,21 @@ func (s *Server) configDefaultProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, s.reloadResult())
+}
+
+func (s *Server) configServer(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Address string `json:"address"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpError(w, err, http.StatusBadRequest)
+		return
+	}
+	if err := config.SetGlobalServerAddress(req.Address); err != nil {
+		httpError(w, err, http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "warnings": []string{"listen address changes require restarting conclave serve"}})
 }
 
 func (s *Server) configMCP(w http.ResponseWriter, r *http.Request) {
@@ -991,10 +1007,14 @@ func (s *Server) boardTaskDetail(w http.ResponseWriter, r *http.Request) {
 	comments, _ := ws.App.Tracker().Comments(r.Context(), task.ID)
 	events, _ := ws.App.Tracker().Events(r.Context(), task.ID)
 	attempts, _ := ws.App.Tracker().Attempts(r.Context(), task.ID)
+	results, _ := ws.App.Tracker().Results(r.Context(), task.ID)
 	if attempts == nil {
 		attempts = []tracker.Attempt{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"task": task, "comments": comments, "events": events, "attempts": attempts})
+	if results == nil {
+		results = []tracker.Result{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"task": task, "comments": comments, "events": events, "attempts": attempts, "results": results})
 }
 
 func (s *Server) boardTaskLogs(w http.ResponseWriter, r *http.Request) {

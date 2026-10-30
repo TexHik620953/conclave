@@ -65,6 +65,18 @@ type Task struct {
 	ReadyAt          *time.Time `json:"ready_at,omitempty"`
 }
 
+type Result struct {
+	ID        string     `json:"id"`
+	TaskID    string     `json:"task_id"`
+	AttemptID string     `json:"attempt_id"`
+	AttemptNo int        `json:"attempt_no"`
+	Content   string     `json:"content"`
+	Verdict   string     `json:"verdict"`
+	CreatedAt time.Time  `json:"created_at"`
+	DecidedAt *time.Time `json:"decided_at,omitempty"`
+	DecidedBy string     `json:"decided_by,omitempty"`
+}
+
 type Blocker struct {
 	TaskID     string     `json:"task_id"`
 	Kind       string     `json:"kind"`
